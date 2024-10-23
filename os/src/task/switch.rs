@@ -11,6 +11,7 @@ use core::arch::global_asm;
 global_asm!(include_str!("switch.S"));
 
 extern "C" {
+    // NOTE: 将这段汇编代码中的全局符号 __switch 解释为一个 Rust 函数
     /// Switch to the context of `next_task_cx_ptr`, saving the current context
     /// in `current_task_cx_ptr`.
     pub fn __switch(current_task_cx_ptr: *mut TaskContext, next_task_cx_ptr: *const TaskContext);

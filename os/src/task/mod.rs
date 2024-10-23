@@ -23,6 +23,7 @@ pub use task::{TaskControlBlock, TaskStatus};
 
 pub use context::TaskContext;
 
+// NOTE: `num_app`在`TaskManager`初始化后就不再变化；
 /// The task manager, where all the tasks are managed.
 ///
 /// Functions implemented on `TaskManager` deals with all task state transitions
@@ -39,6 +40,9 @@ pub struct TaskManager {
     inner: UPSafeCell<TaskManagerInner>,
 }
 
+// NOTE: tasks和current_task会在执行过程中变化：
+// 每个应用的运行状态都会变化，CPU执行的应用也在切换。
+// 所以我们需要将这个struct包含在UPSafeCell内，以获取其内部可以变性以及单核上安全运行时借用检查能力。
 /// Inner of Task Manager
 pub struct TaskManagerInner {
     /// task list
@@ -47,18 +51,24 @@ pub struct TaskManagerInner {
     current_task: usize,
 }
 
+// 初始化出全局实例`TASK_MANAGER`
 lazy_static! {
     /// Global variable: TASK_MANAGER
     pub static ref TASK_MANAGER: TaskManager = {
+        // NOTE: 调用`loader`子模块提供的`get_num_app`接口链接到内核的应用总数
         let num_app = get_num_app();
+        // NOTE: 创建一个初始化的`tasks`数组，其中每个任务控制块都是UnInit：表示未初始化
         let mut tasks = [TaskControlBlock {
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
         }; MAX_APP_NUM];
+        // NOTE: 依次对每个任务控制块进行初始化，将其运行状态设置为`Ready`：
+        // 表示可以运行，并初始化上下文
         for (i, task) in tasks.iter_mut().enumerate() {
             task.task_cx = TaskContext::goto_restore(init_app_cx(i));
             task.task_status = TaskStatus::Ready;
         }
+        // 创建TaskManager实例并返回
         TaskManager {
             num_app,
             inner: unsafe {
@@ -104,6 +114,9 @@ impl TaskManager {
         inner.tasks[current].task_status = TaskStatus::Exited;
     }
 
+    // NOTE:`TaskManagerInner`的`task`是一个固定的任务控制块组成的标，长度为`num_app`
+    // 用下标`0~num_app-1`来访问得到每个应用的控制状态。
+    // 我们就是需要找到`current_task`后面第一个`ready`的应用。
     /// Find next task to run and return task id.
     ///
     /// In this case, we only return the first `Ready` task in task list.
@@ -115,6 +128,7 @@ impl TaskManager {
             .find(|id| inner.tasks[*id].task_status == TaskStatus::Ready)
     }
 
+    // NOTE:
     /// Switch current `Running` task to the task we have found,
     /// or there is no `Ready` task and we can exit with all applications completed
     fn run_next_task(&self) {

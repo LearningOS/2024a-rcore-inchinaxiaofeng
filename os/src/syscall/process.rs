@@ -23,6 +23,7 @@ pub struct TaskInfo {
     time: usize,
 }
 
+// NOTE: 表示应用退出执行
 /// task exits and submit an exit code
 pub fn sys_exit(exit_code: i32) -> ! {
     trace!("[kernel] Application exited with code {}", exit_code);
@@ -30,6 +31,7 @@ pub fn sys_exit(exit_code: i32) -> ! {
     panic!("Unreachable in sys_exit!");
 }
 
+// NOTE: 新增的接口
 /// current task gives up resources for other tasks
 pub fn sys_yield() -> isize {
     trace!("kernel: sys_yield");

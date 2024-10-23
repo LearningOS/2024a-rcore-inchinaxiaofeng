@@ -48,8 +48,10 @@ impl UserStack {
     }
 }
 
+// NOTE: 用于返回第i个App被加载到物理地址的起始，`base_i`
 /// Get base address of app i.
 fn get_base_i(app_id: usize) -> usize {
+    // NOTE: 这两个常数在config子模块中。
     APP_BASE_ADDRESS + app_id * APP_SIZE_LIMIT
 }
 
@@ -61,6 +63,7 @@ pub fn get_num_app() -> usize {
     unsafe { (_num_app as usize as *const usize).read_volatile() }
 }
 
+// NOTE: 内核初始化的时候，通过这个函数将App程序一并加载到内存中。
 /// Load nth user app at
 /// [APP_BASE_ADDRESS + n * APP_SIZE_LIMIT, APP_BASE_ADDRESS + (n+1) * APP_SIZE_LIMIT).
 pub fn load_apps() {
