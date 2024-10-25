@@ -100,6 +100,7 @@ pub fn rust_main() -> ! {
     heap_alloc::init_heap();
     trap::init();
     loader::load_apps();
+    // NOTE: 避免 S 特权级时钟中断被屏蔽
     trap::enable_timer_interrupt();
     timer::set_next_trigger();
     task::run_first_task();

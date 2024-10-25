@@ -50,6 +50,8 @@ pub fn trap_handler(cx: &mut TrapContext) -> &mut TrapContext {
     let stval = stval::read(); // get extra value
                                // trace!("into {:?}", scause.cause());
     match scause.cause() {
+        // NOTE:
+        // 在这里进行异常处理的分发，进入第一个的才是真正的系统调用，在syscall函数中进行统计次数
         Trap::Exception(Exception::UserEnvCall) => {
             // jump to next instruction anyway
             cx.sepc += 4;

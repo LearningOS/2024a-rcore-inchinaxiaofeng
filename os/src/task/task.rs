@@ -1,6 +1,7 @@
 //! Types related to task management
 
 use super::TaskContext;
+use crate::config::MAX_SYSCALL_NUM;
 
 // NOTE: 任务控制块
 // `task_cx`字段维护Task Context
@@ -11,6 +12,8 @@ pub struct TaskControlBlock {
     pub task_status: TaskStatus,
     /// The task context
     pub task_cx: TaskContext,
+    /// The task system call times
+    pub syscall_times: [u32; MAX_SYSCALL_NUM],
 }
 
 // NOTE: 在内核中分别对每个应用维护它们的运行状态，这个是目前的状态。

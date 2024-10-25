@@ -23,6 +23,7 @@ fn sbi_call(which: usize, arg0: usize, arg1: usize, arg2: usize) -> usize {
     ret
 }
 
+// NOTE: 是一个由 SEE 提供的标准 SBI 接口函数，它可以用来设置 mtimecmp 的值。
 /// use sbi call to set timer
 pub fn set_timer(timer: usize) {
     sbi_call(SBI_SET_TIMER, timer, 0, 0);

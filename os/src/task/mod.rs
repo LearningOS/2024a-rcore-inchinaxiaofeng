@@ -14,7 +14,7 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
-use crate::config::MAX_APP_NUM;
+use crate::config::{MAX_APP_NUM, MAX_SYSCALL_NUM};
 use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
 use lazy_static::*;
@@ -34,9 +34,9 @@ pub use context::TaskContext;
 /// borrowing checks to runtime. You can see examples on how to use `inner` in
 /// existing functions on `TaskManager`.
 pub struct TaskManager {
-    /// total number of tasks
+    /// Total number of tasks
     num_app: usize,
-    /// use inner value to get mutable access
+    /// Use inner value to get mutable access
     inner: UPSafeCell<TaskManagerInner>,
 }
 
@@ -45,9 +45,9 @@ pub struct TaskManager {
 // 所以我们需要将这个struct包含在UPSafeCell内，以获取其内部可以变性以及单核上安全运行时借用检查能力。
 /// Inner of Task Manager
 pub struct TaskManagerInner {
-    /// task list
+    /// Task list
     tasks: [TaskControlBlock; MAX_APP_NUM],
-    /// id of current `Running` task
+    /// Id of current `Running` task
     current_task: usize,
 }
 
@@ -61,6 +61,7 @@ lazy_static! {
         let mut tasks = [TaskControlBlock {
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
+            syscall_times: [0; MAX_SYSCALL_NUM],
         }; MAX_APP_NUM];
         // NOTE: 依次对每个任务控制块进行初始化，将其运行状态设置为`Ready`：
         // 表示可以运行，并初始化上下文
@@ -93,7 +94,7 @@ impl TaskManager {
         let next_task_cx_ptr = &task0.task_cx as *const TaskContext;
         drop(inner);
         let mut _unused = TaskContext::zero_init();
-        // before this, we should drop local variables that must be dropped manually
+        // Before this, we should drop local variables that must be dropped manually
         unsafe {
             __switch(&mut _unused as *mut TaskContext, next_task_cx_ptr);
         }
@@ -114,6 +115,24 @@ impl TaskManager {
         inner.tasks[current].task_status = TaskStatus::Exited;
     }
 
+    /// Get current task id, system call times and status.
+    fn get_current_task_info(&self) -> (usize, [u32; MAX_SYSCALL_NUM], TaskStatus) {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        (
+            current,
+            inner.tasks[current].syscall_times,
+            inner.tasks[current].task_status,
+        )
+    }
+
+    /// Current task do a system call, add times
+    fn current_task_do_syscall(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].syscall_times[syscall_id] += 1;
+    }
+
     // NOTE:`TaskManagerInner`的`task`是一个固定的任务控制块组成的标，长度为`num_app`
     // 用下标`0~num_app-1`来访问得到每个应用的控制状态。
     // 我们就是需要找到`current_task`后面第一个`ready`的应用。
@@ -128,7 +147,9 @@ impl TaskManager {
             .find(|id| inner.tasks[*id].task_status == TaskStatus::Ready)
     }
 
-    // NOTE:
+    // NOTE:调用`find_next_task`方法寻找运行状态为Ready的应用并返回其ID
+    // 自身的类型是Option<usize>，说明不一定能找到，当所有应用都是Exit的时候。
+    // 找不到Panic,表明运行完毕，找到了就运行下一个
     /// Switch current `Running` task to the task we have found,
     /// or there is no `Ready` task and we can exit with all applications completed
     fn run_next_task(&self) {
@@ -140,17 +161,26 @@ impl TaskManager {
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
             drop(inner);
-            // before this, we should drop local variables that must be dropped manually
+            // Before this, we should drop local variables that must be dropped manually
             unsafe {
                 __switch(current_task_cx_ptr, next_task_cx_ptr);
             }
-            // go back to user mode
+            // Go back to user mode
         } else {
             panic!("All applications completed!");
         }
     }
 }
 
+/// Get current task's id, system call times and status.
+pub fn get_current_task_info() -> (usize, [u32; MAX_SYSCALL_NUM], TaskStatus) {
+    TASK_MANAGER.get_current_task_info()
+}
+
+/// Current task do a system call, add counter + 1.
+pub fn current_task_do_syscall(syscall_id: usize) {
+    TASK_MANAGER.current_task_do_syscall(syscall_id);
+}
 /// Run the first task in task list.
 pub fn run_first_task() {
     TASK_MANAGER.run_first_task();
