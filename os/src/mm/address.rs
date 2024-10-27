@@ -8,6 +8,10 @@ const VA_WIDTH_SV39: usize = 39;
 const PPN_WIDTH_SV39: usize = PA_WIDTH_SV39 - PAGE_SIZE_BITS;
 const VPN_WIDTH_SV39: usize = VA_WIDTH_SV39 - PAGE_SIZE_BITS;
 
+// NOTE: 这些数据结构都是Rust的元组结构体，可以看成usize的一种包装
+// 不使用RISC-V
+// 64硬件直接对应的usize基本类型，就是为了用Rust编译器的多种方便且安全的**类型转换**（Type
+// Conversion）来构建页表
 /// physical address
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct PhysAddr(pub usize);
@@ -44,10 +48,14 @@ impl Debug for PhysPageNum {
     }
 }
 
+// NOTE: 前者允许我们从一个usize来生成`PhysAddr`，即`PhysAddr::from(_: usize)`将得到一个
 /// T: {PhysAddr, VirtAddr, PhysPageNum, VirtPageNum}
 /// T -> usize: T.0
 /// usize -> T: usize.into()
 
+// NOTE: 允许我们从一个`usize`来生成`PhysAddr`
+// 即`PhysAddr::from(_: size)`将得到一个`PhysAddr`
+// SV39支持的物理地址位宽为56位,使用usize的低56位
 impl From<usize> for PhysAddr {
     fn from(v: usize) -> Self {
         Self(v & ((1 << PA_WIDTH_SV39) - 1))
@@ -58,6 +66,7 @@ impl From<usize> for PhysPageNum {
         Self(v & ((1 << PPN_WIDTH_SV39) - 1))
     }
 }
+// NOTE: 同理，生成虚拟地址的时候，使用`usize`较低的39位
 impl From<usize> for VirtAddr {
     fn from(v: usize) -> Self {
         Self(v & ((1 << VA_WIDTH_SV39) - 1))
@@ -68,6 +77,7 @@ impl From<usize> for VirtPageNum {
         Self(v & ((1 << VPN_WIDTH_SV39) - 1))
     }
 }
+// NOTE: 从PhysAddr获得usize
 impl From<PhysAddr> for usize {
     fn from(v: PhysAddr) -> Self {
         v.0
@@ -125,6 +135,8 @@ impl From<VirtPageNum> for VirtAddr {
         Self(v.0 << PAGE_SIZE_BITS)
     }
 }
+// NOTE: 对于不对齐的情况，物理地址不能通过 From/Into 转换为物理页号，
+// 而是需要通过它自己的 floor 或 ceil 方法来进行下取整或上取整的转换。
 impl PhysAddr {
     /// Get the (floor) physical page number
     pub fn floor(&self) -> PhysPageNum {
@@ -134,6 +146,7 @@ impl PhysAddr {
     pub fn ceil(&self) -> PhysPageNum {
         PhysPageNum((self.0 - 1 + PAGE_SIZE) / PAGE_SIZE)
     }
+    // NOTE: 地址和页号之间可以相互转换
     /// Get the page offset of physical address
     pub fn page_offset(&self) -> usize {
         self.0 & (PAGE_SIZE - 1)
