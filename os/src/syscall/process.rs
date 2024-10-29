@@ -1,4 +1,5 @@
 //! Process management syscalls
+use core::intrinsics::size_of;
 use core::ptr::from_raw_parts;
 
 use crate::task::{self, current_user_token}:current_user_token;
@@ -48,10 +49,11 @@ pub fn sys_yield() -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ? 
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
+    trace!("kernel: sys_get_time");
     let us = get_time_us();
     let dst_vec = translated_byte_buffer(
         current_user_token(),
-        _ts as *const u8, core::mem::size_of::<TimeVal>()
+        _ts as *const u8, size_of::<TimeVal>()
     );
     let ref time_val = TimeVal {
         sec: us / 1_000_000,
@@ -67,7 +69,6 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
             );
         }
     }
-    trace!("kernel: sys_get_time");
     0
 }
 
@@ -75,8 +76,21 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
-
+//    trace!("kernel: sys_task_info");
+//    let (_, syscall_times, task_status) = get_current_task_info();
+//    unsafe {
+//        *ti = TaskInfo {
+//            status: task_status,
+//            syscall_times: syscall_times,
+//            time: get_time_ms(),
+//        };
+//    }
+//    0
     trace!("kernel: sys_task_info NOT IMPLEMENTED YET!");
+    let (_, syscall_times, task_status) = get_current_task_info();
+    let dst_vec = translated_byte_buffer(
+        current_user_token(), _ti as *const u8, size_of::<TaskInfo>()
+    );
     -1
 }
 
