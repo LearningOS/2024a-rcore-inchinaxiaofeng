@@ -76,22 +76,30 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
-//    trace!("kernel: sys_task_info");
-//    let (_, syscall_times, task_status) = get_current_task_info();
-//    unsafe {
-//        *ti = TaskInfo {
-//            status: task_status,
-//            syscall_times: syscall_times,
-//            time: get_time_ms(),
-//        };
-//    }
-//    0
     trace!("kernel: sys_task_info NOT IMPLEMENTED YET!");
     let (_, syscall_times, task_status) = get_current_task_info();
     let dst_vec = translated_byte_buffer(
-        current_user_token(), _ti as *const u8, size_of::<TaskInfo>()
+        current_user_token(),
+        _ti as *const u8,
+        size_of::<TaskInfo>()
     );
-    -1
+    let ref task_info = TaskInfo {
+        status: task_status,
+        syscall_times: syscall_times,
+        time: get_time_ms(),
+    };
+
+    let src_ptr = task_info as *const TaskInfo;
+    for (idx, dst) in dst_vec.into_iter().enumerate() {
+        let unit_len = dst.len();
+        unsafe {
+            dst.copy_from_slice(from_raw_parts(
+                str_ptr.wrapping_byte_add(idx * unit_len) as *const u8,
+                unit_len)
+            );
+        }
+    }
+    0
 }
 
 // YOUR JOB: Implement mmap.

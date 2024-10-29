@@ -127,6 +127,7 @@ impl TaskManager {
         inner.tasks[inner.current_task].get_trap_cx()
     }
 
+    /// Get the current 'Running' task's basic info.
     fn get_current_task_info(&self) -> (usize, [u32; MAX_SYSCALL_NUM], TaskStatus) {
         let inner = self.inner.exclusive_access();
         let current = inner.current_task;
@@ -135,6 +136,13 @@ impl TaskManager {
             inner.tasks[current].syscall_times,
             inner.tasks[current].task_status,
         )
+    }
+
+    /// Current task do a system call, add times
+    fn current_task_do_syscall(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].syscall_times[syscall_id] += 1;
     }
 
     /// Change the current 'Running' task's program break
@@ -169,6 +177,11 @@ impl TaskManager {
 /// Get current task's id, system call times and status.
 pub fn get_current_task_info() -> (usize, [u32; MAX_SYSCALL_NUM], TaskStatus) {
     TASK_MANAGER.get_current_task_info()
+}
+
+/// Current task do a system call, add times.
+pub fn current_task_do_syscall(&self, syscall_id: usize) {
+    TASK_MANAGER.current_task_do_syscall(syscall_id)
 }
 
 /// Run the first task in task list.
