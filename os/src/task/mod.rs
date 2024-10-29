@@ -14,6 +14,7 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
+use crate::config::MAX_SYSCALL_NUM;
 use crate::loader::{get_app_data, get_num_app};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
@@ -126,6 +127,16 @@ impl TaskManager {
         inner.tasks[inner.current_task].get_trap_cx()
     }
 
+    fn get_current_task_info(&self) -> (usize, [u32; MAX_SYSCALL_NUM], TaskStatus) {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        (
+            current,
+            inner.tasks[current].syscall_times,
+            inner.tasks[current].task_status,
+        )
+    }
+
     /// Change the current 'Running' task's program break
     pub fn change_current_program_brk(&self, size: i32) -> Option<usize> {
         let mut inner = self.inner.exclusive_access();
@@ -153,6 +164,11 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+}
+
+/// Get current task's id, system call times and status.
+pub fn get_current_task_info() -> (usize, [u32; MAX_SYSCALL_NUM], TaskStatus) {
+    TASK_MANAGER.get_current_task_info()
 }
 
 /// Run the first task in task list.
