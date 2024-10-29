@@ -60,7 +60,7 @@ pub fn trap_handler() -> ! {
     let cx = current_trap_cx();
     let scause = scause::read(); // get trap cause
     let stval = stval::read(); // get extra value
-    // trace!("into {:?}", scause.cause());
+                               // trace!("into {:?}", scause.cause());
     match scause.cause() {
         Trap::Exception(Exception::UserEnvCall) => {
             // jump to next instruction anyway
@@ -95,6 +95,7 @@ pub fn trap_handler() -> ! {
     trap_return();
 }
 
+// NOTE: 在`trap_handler`完成Trap处理之后，需要调用`trap_return`返回用户态
 #[no_mangle]
 /// return to user space
 /// set the new addr of __restore asm function in TRAMPOLINE page,

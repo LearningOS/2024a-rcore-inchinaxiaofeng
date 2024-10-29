@@ -20,9 +20,10 @@ pub use memory_set::{kernel_stack_position, MapPermission, MemorySet, KERNEL_SPA
 pub use page_table::{translated_byte_buffer, PageTableEntry};
 use page_table::{PTEFlags, PageTable};
 
+// NOTE: 内存管理子系统初始化
 /// initiate heap allocator, frame allocator and kernel space
 pub fn init() {
-    heap_allocator::init_heap();
-    frame_allocator::init_frame_allocator();
-    KERNEL_SPACE.exclusive_access().activate();
+    heap_allocator::init_heap(); // 全局动态内存分配器的初始化
+    frame_allocator::init_frame_allocator(); // 初始化物理页帧管理器，使能可用物理页帧的分配和回收能力
+    KERNEL_SPACE.exclusive_access().activate(); // 创建内核地址空间并让 CPU 开启分页模式
 }

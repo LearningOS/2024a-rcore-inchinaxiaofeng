@@ -15,13 +15,13 @@ pub struct TaskControlBlock {
     pub task_status: TaskStatus,
 
     /// Application address space
-    pub memory_set: MemorySet,
+    pub memory_set: MemorySet, // NOTE: 应用的地址空间
 
     /// The phys page number of trap context
-    pub trap_cx_ppn: PhysPageNum,
+    pub trap_cx_ppn: PhysPageNum, // NOTE: 被实际存放在物理页帧的物理页号
 
     /// The size(top addr) of program which is loaded from elf file
-    pub base_size: usize,
+    pub base_size: usize, // NOTE: 统计了应用数据的大小
 
     /// Heap bottom
     pub heap_bottom: usize,
@@ -39,10 +39,13 @@ impl TaskControlBlock {
     pub fn get_user_token(&self) -> usize {
         self.memory_set.token()
     }
+
     /// Based on the elf info in program, build the contents of task in a new address space
     pub fn new(elf_data: &[u8], app_id: usize) -> Self {
+        // NOTE: 我们解析传入的 ELF 格式数据构造应用的地址空间 memory_set 并获得其他信息
         // memory_set with elf program headers/trampoline/trap context/user stack
         let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
+        // NOTE: 我们从地址空间memory_set中查多级页表找到应用地址空间中的Trap上下文实际被放在哪个物理页帧
         let trap_cx_ppn = memory_set
             .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
             .unwrap()

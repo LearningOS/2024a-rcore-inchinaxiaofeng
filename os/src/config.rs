@@ -21,5 +21,6 @@ pub const TRAMPOLINE: usize = usize::MAX - PAGE_SIZE + 1;
 pub const TRAP_CONTEXT_BASE: usize = TRAMPOLINE - PAGE_SIZE;
 /// clock frequency
 pub const CLOCK_FREQ: usize = 12500000;
+// NOTE: [0x80000000, 0x88000000]
 /// the physical memory end
 pub const MEMORY_END: usize = 0x88000000;

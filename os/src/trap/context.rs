@@ -11,12 +11,14 @@ pub struct TrapContext {
     pub sstatus: Sstatus,
     /// Supervisor Exception Program Counter
     pub sepc: usize,
+    // NOTE: 在应用初始化的时候由内核写入应用地址空间中的TrapContext的相应位置，
+    // 此后就不再被修改。
     /// Token of kernel address space
-    pub kernel_satp: usize,
+    pub kernel_satp: usize, // NOTE: 内核地址空间的token
     /// Kernel stack pointer of the current application
-    pub kernel_sp: usize,
+    pub kernel_sp: usize, // NOTE: 当前应用在内核地址空间中的内核栈栈顶的虚拟地址
     /// Virtual address of trap handler entry point in kernel
-    pub trap_handler: usize,
+    pub trap_handler: usize, // NOTE: 内核中trap handler入口点的虚拟地址
 }
 
 impl TrapContext {
