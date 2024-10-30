@@ -16,6 +16,7 @@ mod task;
 
 use crate::config::MAX_SYSCALL_NUM;
 use crate::loader::{get_app_data, get_num_app};
+use crate::mm::{MapPermission, PageTableEntry, VPNRange, VirtAddr, VirtPageNum};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
 use alloc::vec::Vec;
@@ -127,6 +128,47 @@ impl TaskManager {
         inner.tasks[inner.current_task].get_trap_cx()
     }
 
+    // NOTE: CH4
+    /// Get current task page table
+    fn get_current_task_page_table(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].memory_set.translate(vpn)
+    }
+
+    // NOTE: CH4
+    /// Create new map area
+    fn create_new_map_area(&self, start_va: VirtAddr, end_va: VirtAddr, perm: MapPermission) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current]
+            .memory_set
+            .insert_framed_area(start_va, end_va, perm)
+    }
+
+    // NOTE: CH4
+    ///
+    fn unmap_consecutive_area(&self, start: usize, len: usize) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        let start_vpn = VirtAddr::from(start).floor();
+        let end_vpn = VirtAddr::from(start + len).ceil();
+        let vpns = VPNRange::new(start_vpn, end_vpn);
+        for vpn in vpns {
+            if let Some(pte) = inner.tasks[current].memory_set.translate(vpn) {
+                if !pte.is_valid() {
+                    return -1;
+                }
+                inner.tasks[current].memory_set.get_page_table().unmap(vpn);
+            } else {
+                // Also unmapped if no PTE found
+                return -1;
+            }
+        }
+        0
+    }
+
+    // NOTE: CH3
     /// Get the current 'Running' task's basic info.
     fn get_current_task_info(&self) -> (usize, [u32; MAX_SYSCALL_NUM], TaskStatus) {
         let inner = self.inner.exclusive_access();
@@ -138,6 +180,7 @@ impl TaskManager {
         )
     }
 
+    // NOTE: CH3
     /// Current task do a system call, add times
     fn current_task_do_syscall(&self, syscall_id: usize) {
         let mut inner = self.inner.exclusive_access();
@@ -174,14 +217,34 @@ impl TaskManager {
     }
 }
 
+// NOTE: CH3
 /// Get current task's id, system call times and status.
 pub fn get_current_task_info() -> (usize, [u32; MAX_SYSCALL_NUM], TaskStatus) {
     TASK_MANAGER.get_current_task_info()
 }
 
+// NOTE: CH3
 /// Current task do a system call, add times.
 pub fn current_task_do_syscall(syscall_id: usize) {
     TASK_MANAGER.current_task_do_syscall(syscall_id)
+}
+
+// NOTE: CH4
+/// Get current task page table
+pub fn get_current_task_page_table(vpn: VirtPageNum) -> Option<PageTableEntry> {
+    TASK_MANAGER.get_current_task_page_table(vpn)
+}
+
+// NOTE: CH4
+/// Create new map area
+pub fn create_new_map_area(start_va: VirtAddr, end_va: VirtAddr, perm: MapPermission) {
+    TASK_MANAGER.create_new_map_area(start_va, end_va, perm);
+}
+
+// NOTE: CH4
+/// Unmap consecutive area
+pub fn unmap_consecutive_area(start: usize, len: usize) -> isize {
+    TASK_MANAGER.unmap_consecutive_area(start, len)
 }
 
 /// Run the first task in task list.

@@ -1,7 +1,12 @@
 //! Process management syscalls
 
-use crate::mm::translated_byte_buffer;
-use crate::task::{current_user_token, get_current_task_info};
+use crate::config::{MAXVA, PAGE_SIZE};
+use crate::mm::{translated_byte_buffer, MapPermission};
+use crate::mm::{VPNRange, VirtAddr};
+use crate::task::{
+    create_new_map_area, current_user_token, get_current_task_info, get_current_task_page_table,
+    unmap_consecutive_area,
+};
 
 use crate::timer::{get_time_ms, get_time_us};
 use crate::{
@@ -10,7 +15,6 @@ use crate::{
         change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus,
     },
 };
-
 #[repr(C)]
 #[derive(Debug)]
 pub struct TimeVal {
@@ -43,15 +47,16 @@ pub fn sys_yield() -> isize {
     0
 }
 
+// NOTE: CH4
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time");
     let us = get_time_us();
     let dst_vec = translated_byte_buffer(
         current_user_token(),
-        _ts as *const u8,
+        ts as *const u8,
         core::mem::size_of::<TimeVal>(),
     );
     let ref time_val = TimeVal {
@@ -71,15 +76,16 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     0
 }
 
+// NOTE: CH4
 /// YOUR JOB: Finish sys_task_info to pass testcases
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
-pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
+pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
     trace!("kernel: sys_task_info NOT IMPLEMENTED YET!");
     let (_, syscall_times, task_status) = get_current_task_info();
     let dst_vec = translated_byte_buffer(
         current_user_token(),
-        _ti as *const u8,
+        ti as *const u8,
         core::mem::size_of::<TaskInfo>(),
     );
     let ref task_info = TaskInfo {
@@ -101,16 +107,51 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
     0
 }
 
+// NOTE: CH4
 // YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
+pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
     trace!("kernel: sys_mmap NOT IMPLEMENTED YET!");
-    -1
+    // start aligned with PAGE_SIZE
+    if start % PAGE_SIZE != 0 {
+        return -1;
+    }
+    // check port
+    if (port & !0x7) != 0 || (port & 0x7) == 0 {
+        return -1; // illegal or meaningless
+    }
+    // check the range [start, start+len)
+    let start_vpn = VirtAddr::from(start).floor();
+    let end_vpn = VirtAddr::from(start + len).ceil();
+    let vpns = VPNRange::new(start_vpn, end_vpn);
+    for vpn in vpns {
+        if let Some(pte) = get_current_task_page_table(vpn) {
+            if pte.is_valid() {
+                return -1;
+            }
+        }
+    }
+    // all ptes in range has pass the test
+    create_new_map_area(
+        start_vpn.into(),
+        end_vpn.into(),
+        MapPermission::from_bits_truncate((port << 1) as u8) | MapPermission::U,
+    );
+    0
 }
 
+// NOTE: CH4
 // YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
+pub fn sys_munmap(start: usize, len: usize) -> isize {
     trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
-    -1
+    if start >= MAXVA || start & PAGE_SIZE != 0 {
+        return -1;
+    }
+    // avoid undefined situation
+    let mut mlen = len;
+    if start > MAXVA - len {
+        mlen = MAXVA - start;
+    }
+    unmap_consecutive_area(start, mlen)
 }
 /// change data segment size
 pub fn sys_sbrk(size: i32) -> isize {
