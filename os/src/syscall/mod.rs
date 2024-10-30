@@ -28,6 +28,7 @@ const SYSCALL_TASK_INFO: usize = 410;
 mod fs;
 mod process;
 
+use crate::task::current_task_do_syscall;
 use fs::*;
 use process::*;
 /// handle syscall exception with `syscall_id` and other arguments

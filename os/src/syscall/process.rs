@@ -1,11 +1,9 @@
 //! Process management syscalls
-use core::intrinsics::size_of;
-use core::ptr::from_raw_parts;
 
 use crate::mm::translated_byte_buffer;
-use crate::task::{self, current_user_token, get_current_task_info};
+use crate::task::{current_user_token, get_current_task_info};
 
-use crate::timer::get_time_us;
+use crate::timer::{get_time_ms, get_time_us};
 use crate::{
     config::MAX_SYSCALL_NUM,
     task::{
@@ -51,8 +49,11 @@ pub fn sys_yield() -> isize {
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time");
     let us = get_time_us();
-    let dst_vec =
-        translated_byte_buffer(current_user_token(), _ts as *const u8, size_of::<TimeVal>());
+    let dst_vec = translated_byte_buffer(
+        current_user_token(),
+        _ts as *const u8,
+        core::mem::size_of::<TimeVal>(),
+    );
     let ref time_val = TimeVal {
         sec: us / 1_000_000,
         usec: us % 1_000_000,
@@ -61,7 +62,7 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     for (idx, dst) in dst_vec.into_iter().enumerate() {
         let unit_len = dst.len();
         unsafe {
-            dst.copy_from_slice(from_raw_parts(
+            dst.copy_from_slice(core::slice::from_raw_parts(
                 src_ptr.wrapping_byte_add(idx * unit_len) as *const u8,
                 unit_len,
             ));
@@ -79,7 +80,7 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
     let dst_vec = translated_byte_buffer(
         current_user_token(),
         _ti as *const u8,
-        size_of::<TaskInfo>(),
+        core::mem::size_of::<TaskInfo>(),
     );
     let ref task_info = TaskInfo {
         status: task_status,
@@ -91,8 +92,8 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
     for (idx, dst) in dst_vec.into_iter().enumerate() {
         let unit_len = dst.len();
         unsafe {
-            dst.copy_from_slice(from_raw_parts(
-                str_ptr.wrapping_byte_add(idx * unit_len) as *const u8,
+            dst.copy_from_slice(core::slice::from_raw_parts(
+                src_ptr.wrapping_byte_add(idx * unit_len) as *const u8,
                 unit_len,
             ));
         }
