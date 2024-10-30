@@ -2,8 +2,8 @@
 use core::intrinsics::size_of;
 use core::ptr::from_raw_parts;
 
-use crate::task::{self, current_user_token}:current_user_token;
 use crate::mm::translated_byte_buffer;
+use crate::task::{self, current_user_token, get_current_task_info};
 
 use crate::timer::get_time_us;
 use crate::{
@@ -47,14 +47,12 @@ pub fn sys_yield() -> isize {
 
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
-/// HINT: What if [`TimeVal`] is splitted by two pages ? 
+/// HINT: What if [`TimeVal`] is splitted by two pages ?
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time");
     let us = get_time_us();
-    let dst_vec = translated_byte_buffer(
-        current_user_token(),
-        _ts as *const u8, size_of::<TimeVal>()
-    );
+    let dst_vec =
+        translated_byte_buffer(current_user_token(), _ts as *const u8, size_of::<TimeVal>());
     let ref time_val = TimeVal {
         sec: us / 1_000_000,
         usec: us % 1_000_000,
@@ -65,8 +63,8 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
         unsafe {
             dst.copy_from_slice(from_raw_parts(
                 src_ptr.wrapping_byte_add(idx * unit_len) as *const u8,
-                unit_len)
-            );
+                unit_len,
+            ));
         }
     }
     0
@@ -81,7 +79,7 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
     let dst_vec = translated_byte_buffer(
         current_user_token(),
         _ti as *const u8,
-        size_of::<TaskInfo>()
+        size_of::<TaskInfo>(),
     );
     let ref task_info = TaskInfo {
         status: task_status,
@@ -95,8 +93,8 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
         unsafe {
             dst.copy_from_slice(from_raw_parts(
                 str_ptr.wrapping_byte_add(idx * unit_len) as *const u8,
-                unit_len)
-            );
+                unit_len,
+            ));
         }
     }
     0

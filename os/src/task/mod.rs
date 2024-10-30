@@ -180,7 +180,7 @@ pub fn get_current_task_info() -> (usize, [u32; MAX_SYSCALL_NUM], TaskStatus) {
 }
 
 /// Current task do a system call, add times.
-pub fn current_task_do_syscall(&self, syscall_id: usize) {
+pub fn current_task_do_syscall(syscall_id: usize) {
     TASK_MANAGER.current_task_do_syscall(syscall_id)
 }
 
