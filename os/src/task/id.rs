@@ -9,6 +9,8 @@ use crate::sync::UPSafeCell;
 use alloc::vec::Vec;
 use lazy_static::*;
 
+// NOTE: 类似于之前的页帧分配器`FrameAllocator`，我们同样实现一个简单栈式分配策略的
+// 进程标识符分器`RecycleAllocator`，并全局化为`PID_ALLOCATOR`
 pub struct RecycleAllocator {
     current: usize,
     recycled: Vec<usize>,
@@ -21,6 +23,8 @@ impl RecycleAllocator {
             recycled: Vec::new(),
         }
     }
+    // NOTE: 将会分配出一个将`usize`包装后的PidHandle
+    // 我们将其包装为一个全局分配进程标识符的接口
     pub fn alloc(&mut self) -> usize {
         if let Some(id) = self.recycled.pop() {
             id
@@ -47,9 +51,12 @@ lazy_static! {
         unsafe { UPSafeCell::new(RecycleAllocator::new()) };
 }
 
+// NOTE: 同一时间存在的所有进程都有一个自己的进程标识符，他们是互不相同的整数。
+// 这里抽象为一个PidHanlde类型，其生命周期结束后，对应的整数会被编译器自动回收
 /// Abstract structure of PID
 pub struct PidHandle(pub usize);
 
+// NOTE: 实现Drop特征以允许编译器进行自动资源回收
 impl Drop for PidHandle {
     fn drop(&mut self) {
         //println!("drop pid {}", self.0);
@@ -57,6 +64,7 @@ impl Drop for PidHandle {
     }
 }
 
+// NOTE: 被封装作全局的分配PID的接口
 /// Allocate a new PID
 pub fn pid_alloc() -> PidHandle {
     PidHandle(PID_ALLOCATOR.exclusive_access().alloc())
@@ -69,6 +77,7 @@ pub fn kernel_stack_position(app_id: usize) -> (usize, usize) {
     (bottom, top)
 }
 
+// NOTE: 在这里保存它所需进程的PID
 /// Kernel stack for a process(task)
 pub struct KernelStack(pub usize);
 
@@ -84,6 +93,9 @@ pub fn kstack_alloc() -> KernelStack {
     KernelStack(kstack_id)
 }
 
+// NOTE: 为`KernelStack`实现`Drop`Trait，一旦其生命周期结束，
+// 就将内核地址空间中对应的逻辑段删除，
+// 为此在`MemorySet`中新增了一个名为`remove_area_with_start_vpn`的方法
 impl Drop for KernelStack {
     fn drop(&mut self) {
         let (kernel_stack_bottom, _) = kernel_stack_position(self.0);
@@ -95,7 +107,12 @@ impl Drop for KernelStack {
     }
 }
 
+// NOTE: 内核栈`KernelStack`用到了RAII思想
+// 实际保存它的物理页帧的生命周期被绑定到它下面，
+// 当`KernelStack`生命周期结束后，这些物理页帧将被编译器自动回收
 impl KernelStack {
+    // NOTE: 方法可以将一个类型为T的变量压入内核栈顶并返回其裸指针，
+    // 这也是一个泛型函数。
     /// Push a variable of type T into the top of the KernelStack and return its raw pointer
     #[allow(unused)]
     pub fn push_on_top<T>(&self, value: T) -> *mut T
@@ -109,6 +126,7 @@ impl KernelStack {
         }
         ptr_mut
     }
+    // NOTE: 它在实现的时候用到了第32行的`get_top`方法来获取当前内核栈顶在内核地址空间中的地址
     /// Get the top of the KernelStack
     pub fn get_top(&self) -> usize {
         let (_, kernel_stack_top) = kernel_stack_position(self.0);

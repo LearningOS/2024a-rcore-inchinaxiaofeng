@@ -183,6 +183,8 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
     v
 }
 
+// NOTE: `translated_str`用来从用户地址空间中查找字符串。
+// 原理就是逐字节查页表直到发现一个`\0`为止
 /// Translate&Copy a ptr[u8] array end with `\0` to a `String` Vec through page table
 pub fn translated_str(token: usize, ptr: *const u8) -> String {
     let page_table = PageTable::from_token(token);
@@ -202,6 +204,8 @@ pub fn translated_str(token: usize, ptr: *const u8) -> String {
     }
     string
 }
+
+// NOTE: `translated_refmut`可以手动查找页表找到对应物理内存中的位置
 /// Translate a ptr[u8] array through page table and return a mutable reference of T
 pub fn translated_refmut<T>(token: usize, ptr: *mut T) -> &'static mut T {
     //trace!("into translated_refmut!");

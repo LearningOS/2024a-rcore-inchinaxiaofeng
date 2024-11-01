@@ -233,9 +233,15 @@ impl MemorySet {
             elf.header.pt2.entry_point() as usize,
         )
     }
+
+    // NOTE: 可以复制一个完全相同的地址空间
     /// Create a new address space by copy code&data from a exited process's address space.
     pub fn from_existed_user(user_space: &Self) -> Self {
+        // NOTE: 通过`new_bare`新创建一个空的地址空间
         let mut memory_set = Self::new_bare();
+        // NOTE: 通过map_trampoline映射到跳板上，
+        // 因为我们解析ELF创建地址空间的时候，没有将跳板页做一个单独逻辑段，
+        // 插入到地址空间的逻辑段向量`areas`中，所以需要单独映射上去。
         // map trampoline
         memory_set.map_trampoline();
         // copy data sections/trap_context/user_stack
@@ -301,6 +307,7 @@ impl MemorySet {
         }
     }
 }
+
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
     vpn_range: VPNRange,
@@ -309,6 +316,8 @@ pub struct MapArea {
     map_perm: MapPermission,
 }
 
+// NOTE: 实现fork时，
+// 最关键与困难的一点是给子进程创建一个和父进程几乎完全相同的地址空间
 impl MapArea {
     pub fn new(
         start_va: VirtAddr,
@@ -325,6 +334,8 @@ impl MapArea {
             map_perm,
         }
     }
+    // NOTE: 可以从一个逻辑段复制得到一个虚拟地址区间、映射方式和权限控制均相同的逻辑段，
+    // 不同的是由于它尚未被真正映射到物理页帧上，所以`data_frames`字段为空
     pub fn from_another(another: &Self) -> Self {
         Self {
             vpn_range: VPNRange::new(another.vpn_range.get_start(), another.vpn_range.get_end()),

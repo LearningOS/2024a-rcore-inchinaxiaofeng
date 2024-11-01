@@ -62,6 +62,12 @@ pub fn trap_handler() -> ! {
     // trace!("into {:?}", scause.cause());
     match scause.cause() {
         Trap::Exception(Exception::UserEnvCall) => {
+            // NOTE: 这个cx是当前应用的Trap上下文的可变引用，
+            // 我们需要通过查页表找到它具体被放在哪个物理页帧上，
+            // 并构造相同的虚拟地址来在内核中访问它。
+            // 对于系统调用`sys_exec`来说，调用它之后，`trap_handler`原来上下文中的`cx`失效了，
+            // 因为它是就原来的地址空间而言的。
+            // 为了能处理类似的情况，我们要在syscall返回之后，重新获取`cx`，目前实现如下：
             // jump to next instruction anyway
             let mut cx = current_trap_cx();
             cx.sepc += 4;
@@ -83,16 +89,19 @@ pub fn trap_handler() -> ! {
                 stval,
                 current_trap_cx().sepc,
             );
+            // NOTE: 出错由内核终止之后，会在内核中调用 exit_current_and_run_next 函数
             // page fault exit code
             exit_current_and_run_next(-2);
         }
         Trap::Exception(Exception::IllegalInstruction) => {
             println!("[kernel] IllegalInstruction in application, kernel killed it.");
+            // NOTE: 出错由内核终止之后，会在内核中调用 exit_current_and_run_next 函数
             // illegal instruction exit code
             exit_current_and_run_next(-3);
         }
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             set_next_trigger();
+            // NOTE: 暂停当前任务，并切换到下一个任务
             suspend_current_and_run_next();
         }
         _ => {

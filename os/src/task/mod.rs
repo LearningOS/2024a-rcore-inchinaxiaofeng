@@ -35,11 +35,15 @@ pub use processor::{
     current_task, current_trap_cx, current_user_token, run_tasks, schedule, take_current_task,
     Processor,
 };
+
+// NOTE: 进行了修改
 /// Suspend the current 'Running' task and run the next task in task list.
 pub fn suspend_current_and_run_next() {
+    // NOTE: 首先通过`task_current_task`来取出当前执行的任务，
     // There must be an application running.
     let task = take_current_task().unwrap();
 
+    // NOTE: 修改进程控制块内的状态
     // ---- access current TCB exclusively
     let mut task_inner = task.inner_exclusive_access();
     let task_cx_ptr = &mut task_inner.task_cx as *mut TaskContext;
@@ -48,8 +52,10 @@ pub fn suspend_current_and_run_next() {
     drop(task_inner);
     // ---- release current PCB
 
+    // NOTE: 将任务放入任务管理器的队尾
     // push back to ready queue.
     add_task(task);
+    // NOTE: 触发调度并切换任务
     // jump to scheduling cycle
     schedule(task_cx_ptr);
 }
@@ -59,6 +65,8 @@ pub const IDLE_PID: usize = 0;
 
 /// Exit the current 'Running' task and run the next task in task list.
 pub fn exit_current_and_run_next(exit_code: i32) {
+    // NOTE: 调用`take_current_task`来将当前进程控制块从处理器监控`PROCESSOR`中取出，
+    // 而不只是得到一份拷贝，这是为了正确维护进程控制块的引用计数
     // take from Processor
     let task = take_current_task().unwrap();
 
@@ -73,14 +81,17 @@ pub fn exit_current_and_run_next(exit_code: i32) {
 
     // **** access current TCB exclusively
     let mut inner = task.inner_exclusive_access();
+    // NOTE: 将进程控制块中的状态修改为`TaskStatus::Zombie`即僵尸进程
     // Change status to Zombie
     inner.task_status = TaskStatus::Zombie;
+    // NOTE: 将传入的退出码`exit_code`写入进程控制块中，后续父进程在`waitpid`的时候可以收集
     // Record exit code
     inner.exit_code = exit_code;
     // do not move to its parent but under initproc
 
     // ++++++ access initproc TCB exclusively
     {
+        // NOTE: 将当前进程的所有子进程挂在初始进程`initproc`下面
         let mut initproc_inner = INITPROC.inner_exclusive_access();
         for child in inner.children.iter() {
             child.inner_exclusive_access().parent = Some(Arc::downgrade(&INITPROC));
@@ -89,7 +100,12 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     }
     // ++++++ release parent PCB
 
+    // NOTE: 当前进程的子向量清空
     inner.children.clear();
+    // NOTE: 对于当前进程占用的资源进行早期回收。
+    // `MemorySet::recycle_data_pages`只是将地址空间中的逻辑段列表`areas`清空，
+    // 这会导致应用地址空间的所有数据被存放在的物理页帧被回收，
+    // 而用来存放页表的那些物理页帧此时则不会被回收
     // deallocate user space
     inner.memory_set.recycle_data_pages();
     drop(inner);
@@ -98,19 +114,28 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     drop(task);
     // we do not have to save task context
     let mut _unused = TaskContext::zero_init();
+    // NOTE:
+    // 调用`schedule`出发调度及任务切换，由于再也不会回到个该进程的执行过程，
+    // 因此需要关心任务的上下文切换
     schedule(&mut _unused as *mut _);
 }
 
 lazy_static! {
+    // NOTE: 初始进程的进程控制块
     /// Creation of initial process
     ///
     /// the name "initproc" may be changed to any other app name like "usertests",
     /// but we have user_shell, so we don't need to change it.
+    // NOTE: 调用`TaskControlBlock::new`来创建一个进程控制块，
+    // 其需要传入ELF可执行文件的数据切片作为参数，
+    // 这个参数需要通过加载器`loader`子模块提供的`get_app_data_by_name`接口查找`initproc`的ELF数据来获得
     pub static ref INITPROC: Arc<TaskControlBlock> = Arc::new(TaskControlBlock::new(
         get_app_data_by_name("ch5b_initproc").unwrap()
     ));
 }
 
+// NOTE: 初始化`INITPROC`之后，
+// 则在这个函数中可以调用`task`的任务管理器`manager`子模块提供的`add_task`接口将其加入到任务管理器
 ///Add init process to the manager
 pub fn add_initproc() {
     add_task(INITPROC.clone());
