@@ -2,13 +2,16 @@
 use alloc::sync::Arc;
 
 use crate::{
-    config::MAX_SYSCALL_NUM,
+    config::{MAXVA, MAX_SYSCALL_NUM, PAGE_SIZE},
     loader::get_app_data_by_name,
-    mm::{translated_byte_buffer, translated_refmut, translated_str},
+    mm::{
+        translated_byte_buffer, translated_refmut, translated_str, MapPermission, VPNRange,
+        VirtAddr,
+    },
     task::{
-        add_task, current_task, current_user_token, exit_current_and_run_next,
-        get_current_task_status, get_current_task_syscall_times, suspend_current_and_run_next,
-        TaskStatus,
+        add_task, create_new_map_area, current_task, current_user_token, exit_current_and_run_next,
+        get_current_task_page_table, get_current_task_status, get_current_task_syscall_times,
+        suspend_current_and_run_next, unmap_consecutive_area, TaskStatus,
     },
     timer::{get_time_ms, get_time_us},
 };
@@ -221,22 +224,60 @@ pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
     0
 }
 
-/// YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
+/// Implement in [CH5], function `mmap()`.
+/// `Mmap` the mapped virtual address
+pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    if start % PAGE_SIZE != 0 /* start need to be page aligned */ ||
+        port & !0x7 != 0 /* other bits of needs to be zero */ ||
+        port & 0x7 == 0 /* No permission set, meaningless */ ||
+        start >= MAXVA
+    /* mapping range should be an legal address */
+    {
+        return -1;
+    }
+
+    // Check the range [start, start + len)
+    let start_vpn = VirtAddr::from(start).floor();
+    let end_vpn = VirtAddr::from(start + len).ceil();
+    let vpns = VPNRange::new(start_vpn, end_vpn);
+    for vpn in vpns {
+        if let Some(pte) = get_current_task_page_table(vpn) {
+            // We find a pte that has been mapped
+            if pte.is_valid() {
+                return -1;
+            }
+        }
+    }
+
+    // All `ptes` in range has pass the test
+    create_new_map_area(
+        start_vpn.into(),
+        end_vpn.into(),
+        MapPermission::from_bits_truncate((port << 1) as u8) | MapPermission::U,
+    );
+    0
 }
 
-/// YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
+/// Implement in [CH5]
+/// `Munmap` the mapped virtual address
+pub fn sys_munmap(start: usize, len: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    if start >= MAXVA || start & PAGE_SIZE != 0 {
+        return -1;
+    }
+    // Avoid undefined situation
+    let mut mlen = len;
+    if start > MAXVA - len {
+        mlen = MAXVA - start;
+    }
+    unmap_consecutive_area(start, mlen)
 }
 
 /// change data segment size
