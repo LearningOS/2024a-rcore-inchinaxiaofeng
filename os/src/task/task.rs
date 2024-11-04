@@ -24,7 +24,8 @@ pub struct TaskControlBlock {
 
     // NOTE: 提供互斥从而避免数据竞争
     /// Mutable
-    inner: UPSafeCell<TaskControlBlockInner>,
+    /// Change in [CH5], from private to public
+    pub inner: UPSafeCell<TaskControlBlockInner>,
 }
 
 impl TaskControlBlock {
@@ -40,6 +41,7 @@ impl TaskControlBlock {
     }
 }
 
+/// TODO: Write this documentation
 pub struct TaskControlBlockInner {
     // NOTE: 指出了应用地址空间中的 Trap 上下文被放在的物理页帧的物理页号。
     /// The physical page number of the frame where the trap context is placed
@@ -117,6 +119,7 @@ impl TaskControlBlockInner {
     pub fn get_status(&self) -> TaskStatus {
         self.task_status
     }
+    /// Judge is zombie
     pub fn is_zombie(&self) -> bool {
         self.get_status() == TaskStatus::Zombie
     }

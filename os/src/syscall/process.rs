@@ -1,20 +1,24 @@
 //! Process management syscalls
-use alloc::sync::Arc;
 
 use crate::{
-    config::{MAXVA, MAX_SYSCALL_NUM, PAGE_SIZE},
+    config::{MAXVA, MAX_SYSCALL_NUM, PAGE_SIZE, TRAP_CONTEXT_BASE},
     loader::get_app_data_by_name,
     mm::{
-        translated_byte_buffer, translated_refmut, translated_str, MapPermission, VPNRange,
-        VirtAddr,
+        translated_byte_buffer, translated_refmut, translated_str, MapPermission, MemorySet,
+        VPNRange, VirtAddr, KERNEL_SPACE,
     },
+    sync::UPSafeCell,
     task::{
         add_task, create_new_map_area, current_task, current_user_token, exit_current_and_run_next,
         get_current_task_page_table, get_current_task_status, get_current_task_syscall_times,
-        suspend_current_and_run_next, unmap_consecutive_area, TaskStatus,
+        pid_alloc, suspend_current_and_run_next, unmap_consecutive_area, KernelStack, TaskContext,
+        TaskControlBlock, TaskControlBlockInner, TaskStatus,
     },
     timer::{get_time_ms, get_time_us},
+    trap::{trap_handler, TrapContext},
 };
+use alloc::sync::Arc;
+use alloc::vec::Vec;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -163,6 +167,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 }
 
 /// Implement in [CH3], re implement in [CH5]
+/// XXX: Maybe Wrong! Not pass any test.
 pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
@@ -195,6 +200,7 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
 /// * `get_current_task_status()`
 /// * `get_current_task_syscall_times()`
 /// * `get_current_task_time_cost()`
+/// XXX: Maybe Wrong! Not pass any test.
 pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
     trace!(
         "kernel:pid[{}] sys_task_info NOT IMPLEMENTED",
@@ -226,6 +232,7 @@ pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
 
 /// Implement in [CH5], function `mmap()`.
 /// `Mmap` the mapped virtual address
+/// XXX: Maybe Wrong! Not pass any test.
 pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
@@ -264,6 +271,7 @@ pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
 
 /// Implement in [CH5]
 /// `Munmap` the mapped virtual address
+/// XXX: Maybe Wrong! Not pass any test.
 pub fn sys_munmap(start: usize, len: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
@@ -292,12 +300,66 @@ pub fn sys_sbrk(size: i32) -> isize {
 
 /// YOUR JOB: Implement spawn.
 /// HINT: fork + exec =/= spawn
-pub fn sys_spawn(_path: *const u8) -> isize {
+/// Implement in [CH5]
+pub fn sys_spawn(path: *const u8) -> isize {
     trace!(
         "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let task = current_task().unwrap();
+    let mut parent_inner = task.inner_exclusive_access();
+    let token = parent_inner.memory_set.token();
+    let path = translated_str(token, path);
+    if let Some(elf_data) = get_app_data_by_name(path.as_str()) {
+        let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
+        let trap_cx_ppn = memory_set
+            .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
+            .unwrap()
+            .ppn();
+        // Allocate a pid and a kernel stack in kernel space
+        let pid_handle = pid_alloc();
+        let kernel_stack = KernelStack::new(&pid_handle);
+        let kernel_stack_top = kernel_stack.get_top();
+        let task_control_block = Arc::new(TaskControlBlock {
+            pid: pid_handle,
+            kernel_stack,
+            inner: unsafe {
+                UPSafeCell::new(TaskControlBlockInner {
+                    trap_cx_ppn,
+                    base_size: parent_inner.base_size,
+                    task_cx: TaskContext::goto_trap_return(kernel_stack_top),
+                    task_status: TaskStatus::Ready,
+                    memory_set,
+                    parent: Some(Arc::downgrade(&task)),
+                    children: Vec::new(),
+                    exit_code: 0,
+                    heap_bottom: parent_inner.heap_bottom,
+                    program_brk: parent_inner.program_brk,
+                    syscall_times: [0; MAX_SYSCALL_NUM],
+                    user_time: 0,
+                    kernel_time: 0,
+                    checkpoint: get_time_ms(), // Give the new process a new start point
+                })
+            },
+        });
+
+        // Add child
+        parent_inner.children.push(task_control_block.clone());
+        // Prepare TrapContext in user space
+        let trap_cx = task_control_block.inner_exclusive_access().get_trap_cx();
+        *trap_cx = TrapContext::app_init_context(
+            entry_point,
+            user_sp,
+            KERNEL_SPACE.exclusive_access().token(),
+            kernel_stack_top,
+            trap_handler as usize,
+        );
+        let pid = task_control_block.pid.0 as isize;
+        add_task(task_control_block);
+        pid
+    } else {
+        return -1;
+    }
 }
 
 // YOUR JOB: Set task priority.

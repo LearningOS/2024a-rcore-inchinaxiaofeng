@@ -52,8 +52,8 @@ lazy_static! {
 }
 
 // NOTE: 同一时间存在的所有进程都有一个自己的进程标识符，他们是互不相同的整数。
-// 这里抽象为一个PidHanlde类型，其生命周期结束后，对应的整数会被编译器自动回收
-/// Abstract structure of PID
+// 这里抽象为一个`PidHanlde`类型，其生命周期结束后，对应的整数会被编译器自动回收
+/// Abstract structure of `PID`
 pub struct PidHandle(pub usize);
 
 // NOTE: 实现Drop特征以允许编译器进行自动资源回收
@@ -64,8 +64,8 @@ impl Drop for PidHandle {
     }
 }
 
-// NOTE: 被封装作全局的分配PID的接口
-/// Allocate a new PID
+// NOTE: 被封装作全局的分配`PID`的接口
+/// Allocate a new `PID`
 pub fn pid_alloc() -> PidHandle {
     PidHandle(PID_ALLOCATOR.exclusive_access().alloc())
 }
@@ -77,11 +77,11 @@ pub fn kernel_stack_position(app_id: usize) -> (usize, usize) {
     (bottom, top)
 }
 
-// NOTE: 在这里保存它所需进程的PID
+// NOTE: 在这里保存它所需进程的`PID`
 /// Kernel stack for a process(task)
 pub struct KernelStack(pub usize);
 
-/// allocate a new kernel stack
+/// Allocate a new kernel stack
 pub fn kstack_alloc() -> KernelStack {
     let kstack_id = KSTACK_ALLOCATOR.exclusive_access().alloc();
     let (kstack_bottom, kstack_top) = kernel_stack_position(kstack_id);
@@ -107,7 +107,7 @@ impl Drop for KernelStack {
     }
 }
 
-// NOTE: 内核栈`KernelStack`用到了RAII思想
+// NOTE: 内核栈`KernelStack`用到了`RAII`思想
 // 实际保存它的物理页帧的生命周期被绑定到它下面，
 // 当`KernelStack`生命周期结束后，这些物理页帧将被编译器自动回收
 impl KernelStack {
@@ -131,5 +131,19 @@ impl KernelStack {
     pub fn get_top(&self) -> usize {
         let (_, kernel_stack_top) = kernel_stack_position(self.0);
         kernel_stack_top
+    }
+
+    /// Implement in [CH5]
+    /// This function is noted in book, but not implement in real project,
+    /// so I re implement this function.
+    pub fn new(pid_handle: &PidHandle) -> Self {
+        let pid = pid_handle.0;
+        let (kernel_stack_bottom, kernel_stack_top) = kernel_stack_position(pid);
+        KERNEL_SPACE.exclusive_access().insert_framed_area(
+            kernel_stack_bottom.into(),
+            kernel_stack_top.into(),
+            MapPermission::R | MapPermission::W,
+        );
+        KernelStack(pid_handle.0)
     }
 }
