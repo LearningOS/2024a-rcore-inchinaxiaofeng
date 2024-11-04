@@ -1,4 +1,4 @@
-//! Types related to task management & Functions for completely changing TCB
+//! Types related to task management & Functions for completely changing `TCB`
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 use crate::config::{MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE};
@@ -30,7 +30,7 @@ pub struct TaskControlBlock {
 
 impl TaskControlBlock {
     // NOTE: 尝试获取互斥锁来得到`TaskControlBlockInner`的可变引用
-    /// Get the mutable reference of the inner TCB
+    /// Get the mutable reference of the inner `TCB`
     pub fn inner_exclusive_access(&self) -> RefMut<'_, TaskControlBlockInner> {
         self.inner.exclusive_access()
     }
@@ -41,7 +41,7 @@ impl TaskControlBlock {
     }
 }
 
-/// TODO: Write this documentation
+/// The Data that really work in `TCB`.
 pub struct TaskControlBlockInner {
     // NOTE: 指出了应用地址空间中的 Trap 上下文被放在的物理页帧的物理页号。
     /// The physical page number of the frame where the trap context is placed
@@ -74,12 +74,12 @@ pub struct TaskControlBlockInner {
 
     // NOTE: 将当前进程的所有子进程的任务控制块以Arc智能指针的形式保存在一个向量中，
     // 这样才能够更方便的找到它们
-    /// A vector containing TCBs of all child processes of the current process
+    /// A vector containing `TCBs` of all child processes of the current process
     pub children: Vec<Arc<TaskControlBlock>>,
 
     // NOTE: 当进程调用 exit 系统调用主动退出或者执行出错由内核终止的时候，
     // 它的退出码 exit_code 会被内核保存在它的任务控制块中，
-    // 并等待它的父进程通过 waitpid 回收它的资源的同时也收集它的 PID 以及退出码。
+    // 并等待它的父进程通过`waitpid`回收它的资源的同时也收集它的 PID 以及退出码。
     /// It is set when active exit or execution error occurs
     pub exit_code: i32,
 
@@ -101,20 +101,26 @@ pub struct TaskControlBlockInner {
     /// Implement in [CH5], use for time.
     /// Record time point.
     pub checkpoint: usize,
+
+    /// Implement in [CH5], for `sys_set_prio`
+    pub stride: u64,
+
+    /// Implement in [CH5], for `sys_set_prio`
+    pub priority: u64,
 }
 
 // NOTE: 提供的方法主要是对于它内部字段的快捷访问
 impl TaskControlBlockInner {
-    /// get the trap context
+    /// Get the trap context
     pub fn get_trap_cx(&self) -> &'static mut TrapContext {
         self.trap_cx_ppn.get_mut()
     }
-    /// get the user token
+    /// Get the user token
     pub fn get_user_token(&self) -> usize {
         self.memory_set.token()
     }
     /// Change in [CH5]
-    /// get_status原本是一个私有函数，为了实现sys_task_info，
+    /// get_status原本是一个私有函数，为了实现`sys_task_info`，
     /// 将其修改为pub，用于获取当前Task的`TaskStatus`
     pub fn get_status(&self) -> TaskStatus {
         self.task_status
@@ -130,13 +136,18 @@ impl TaskControlBlockInner {
         self.checkpoint = get_time_ms();
         return self.checkpoint - prev_point;
     }
+    /// Implement in [CH5]
+    /// Set the priority of stride
+    pub fn set_priority(&mut self, level: u64) {
+        self.priority = level;
+    }
 }
 
 impl TaskControlBlock {
     // NOTE: 用来创建一个新进程，目前仅用于内核手动创建唯一一个初始进程`initproc`
     /// Create a new process
     ///
-    /// At present, it is only used for the creation of initproc
+    /// At present, it is only used for the creation of `initproc`
     pub fn new(elf_data: &[u8]) -> Self {
         // NOTE:
         // 解析ELF得到应用地址空间`memory_set`
@@ -176,10 +187,12 @@ impl TaskControlBlock {
                     user_time: 0,
                     kernel_time: 0,
                     checkpoint: 0,
+                    stride: 0,
+                    priority: 16,
                 })
             },
         };
-        // prepare TrapContext in user space
+        // Prepare TrapContext in user space
         let trap_cx = task_control_block.inner_exclusive_access().get_trap_cx();
         // NOTE: 初始化位于该进程应用空间中的Trap上下文，
         // 使得第一次进入用户态时，能正确跳转到应用入口点并设置好用户栈，
@@ -197,26 +210,26 @@ impl TaskControlBlock {
     // NOTE: 用来实现`exec`系统调用，即当前进程加载并执行另一个ELF格式可执行文件
     /// Load a new elf to replace the original application address space and start execution
     pub fn exec(&self, elf_data: &[u8]) {
-        // memory_set with elf program headers/trampoline/trap context/user stack
+        // Memory_set with elf program headers/trampoline/trap context/user stack
         let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
         let trap_cx_ppn = memory_set
             .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
             .unwrap()
             .ppn();
 
-        // **** access current TCB exclusively
+        // **** Access current `TCB` exclusively
         let mut inner = self.inner_exclusive_access();
         // NOTE: 首先从ELF生成一个全新的地址空间并直接替换进来，
         // 这将导致原有地址空间生命周期结束，里面包含的全部物理页帧都会被回收
         // substitute memory_set
         inner.memory_set = memory_set;
-        // update trap_cx ppn
+        // Update `trap_cx` ppn
         inner.trap_cx_ppn = trap_cx_ppn;
-        // initialize base_size
+        // Initialize base_size
         inner.base_size = user_sp;
         // NOTE: 然后修改新的地址空间中的Trap上下文，将解析得到的应用入口点、
         // 用户栈位置以及一些内核的信息进行初始化，这样才能正常实现Trap机制
-        // initialize trap_cx
+        // initialize `trap_cx`
         let trap_cx = inner.get_trap_cx();
         *trap_cx = TrapContext::app_init_context(
             entry_point,
@@ -225,13 +238,13 @@ impl TaskControlBlock {
             self.kernel_stack.get_top(),
             trap_handler as usize,
         );
-        // **** release inner automatically
+        // **** Release inner automatically
     }
 
     // NOTE: 用来实现`fork`系统调用，即当前进程fork出来一个与之几乎相同的子进程
     /// parent process fork the child process
     pub fn fork(self: &Arc<Self>) -> Arc<Self> {
-        // ---- access parent PCB exclusively
+        // ---- Access parent PCB exclusively
         let mut parent_inner = self.inner_exclusive_access();
         // NOTE: 调用`MemorySet::from_existed_user`复制父进程地址空间得到子进程的地址空间
         // copy user space(include trap context)
@@ -240,7 +253,7 @@ impl TaskControlBlock {
             .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
             .unwrap()
             .ppn();
-        // alloc a pid and a kernel stack in kernel space
+        // Alloc a pid and a kernel stack in kernel space
         let pid_handle = pid_alloc();
         let kernel_stack = kstack_alloc();
         let kernel_stack_top = kernel_stack.get_top();
@@ -263,28 +276,30 @@ impl TaskControlBlock {
                     user_time: 0,
                     kernel_time: 0,
                     checkpoint: get_time_ms(),
+                    stride: 0,
+                    priority: 16,
                 })
             },
         });
-        // add child
+        // Add child
         parent_inner.children.push(task_control_block.clone());
-        // modify kernel_sp in trap_cx
+        // Modify `kernel_sp` in `trap_cx`
         // **** access child PCB exclusively
         let trap_cx = task_control_block.inner_exclusive_access().get_trap_cx();
         trap_cx.kernel_sp = kernel_stack_top;
-        // return
+        // Return
         task_control_block
-        // **** release child PCB
-        // ---- release parent PCB
+        // **** Release child PCB
+        // ---- Release parent PCB
     }
 
-    // NOTE: 以usize的形式返回当前进程的PID
-    /// get pid of process
+    // NOTE: 以`usize`的形式返回当前进程的PID
+    /// Get pid of process
     pub fn getpid(&self) -> usize {
         self.pid.0
     }
 
-    /// change the location of the program break. return None if failed.
+    /// Change the location of the program break. Return None if failed.
     pub fn change_program_brk(&self, size: i32) -> Option<usize> {
         let mut inner = self.inner_exclusive_access();
         let heap_bottom = inner.heap_bottom;
@@ -312,14 +327,14 @@ impl TaskControlBlock {
 }
 
 #[derive(Copy, Clone, PartialEq)]
-/// task status: UnInit, Ready, Running, Exited
+/// Task status: UnInit, Ready, Running, Exited
 pub enum TaskStatus {
-    /// uninitialized
+    /// Uninitialized
     UnInit,
-    /// ready to run
+    /// Ready to run
     Ready,
-    /// running
+    /// Running
     Running,
-    /// exited
+    /// Exited
     Zombie,
 }

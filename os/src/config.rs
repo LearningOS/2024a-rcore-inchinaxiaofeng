@@ -25,3 +25,5 @@ pub const CLOCK_FREQ: usize = 12500000;
 pub const MEMORY_END: usize = 0x88000000;
 /// Implement in [CH5]
 pub const MAXVA: usize = usize::MAX;
+/// Implement in [CH5]
+pub const BIG_STRIDE: u64 = u64::MAX;

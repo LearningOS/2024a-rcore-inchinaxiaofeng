@@ -1,4 +1,4 @@
-//! Process management syscalls
+//! Process management `syscalls`
 
 use crate::{
     config::{MAXVA, MAX_SYSCALL_NUM, PAGE_SIZE, TRAP_CONTEXT_BASE},
@@ -32,7 +32,7 @@ pub struct TimeVal {
 pub struct TaskInfo {
     /// Task status in it's life cycle
     status: TaskStatus,
-    /// The numbers of syscall called by task
+    /// The numbers of `syscall` called by task
     syscall_times: [u32; MAX_SYSCALL_NUM],
     /// Total running time of task
     time: usize,
@@ -61,13 +61,13 @@ pub fn sys_getpid() -> isize {
     current_task().unwrap().pid.0 as isize
 }
 
-// NOTE: 调用`sys_fork`之前，我们已经将当前进程Trap上下文的sepc向后移动了4字节，
-// 使得它返回到用户态之后，从ecall下一条指令开始执行。。
-// 之后，当我们复制地址空间时，子进程地址空间Trap上下文的sepc也是移动之后的值，
+// NOTE: 调用`sys_fork`之前，我们已经将当前进程Trap上下文的`sepc`向后移动了4字节，
+// 使得它返回到用户态之后，从`ecall`下一条指令开始执行。。
+// 之后，当我们复制地址空间时，子进程地址空间Trap上下文的`sepc`也是移动之后的值，
 // 我们无需再进行修改
 /// 功能：由当前进程 fork 出一个子进程。
 /// 返回值：对于子进程返回 0，对于当前进程则返回子进程的 PID 。
-/// syscall ID：220
+/// `syscall ID`：220
 pub fn sys_fork() -> isize {
     trace!("kernel:pid[{}] sys_fork", current_task().unwrap().pid.0);
     let current_task = current_task().unwrap();
@@ -78,10 +78,10 @@ pub fn sys_fork() -> isize {
     // 这样就做到，父进程`fork`返回值为子进程的pid，子进程返回0
     // modify trap context of new_task, because it returns immediately after switching
     let trap_cx = new_task.inner_exclusive_access().get_trap_cx();
-    // we do not have to move to next instruction since we have done it before
+    // We do not have to move to next instruction since we have done it before
     // for child process, fork returns 0
     trap_cx.x[10] = 0;
-    // add new task to scheduler
+    // Add new task to scheduler
     add_task(new_task);
     new_pid as isize
 }
@@ -90,7 +90,7 @@ pub fn sys_fork() -> isize {
 /// 参数：字符串 path 给出了要加载的可执行文件的名字；
 /// 返回值：如果出错的话（如找不到名字相符的可执行文件）则返回 -1，否则不应该返回。
 /// 注意：path 必须以 "\0" 结尾，否则内核将无法确定其长度
-/// syscall ID：221
+/// `syscall ID`：221
 pub fn sys_exec(path: *const u8) -> isize {
     trace!("kernel:pid[{}] sys_exec", current_task().unwrap().pid.0);
     let token = current_user_token();
@@ -119,7 +119,7 @@ pub fn sys_exec(path: *const u8) -> isize {
 /// exit_code 表示保存子进程返回值的地址，如果这个地址为 0 的话表示不必保存。
 /// 返回值：如果要等待的子进程不存在则返回 -1；否则如果要等待的子进程均未结束则返回 -2；
 /// 否则返回结束的子进程的进程 ID。
-/// syscall ID：260
+/// `syscall ID`：260
 /// If there is not a child process whose pid is same as given, return -1.
 /// Else if there is a child process but it is still running, return -2.
 pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
@@ -129,7 +129,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
         pid
     );
     let task = current_task().unwrap();
-    // find a child process
+    // Find a child process
 
     // NOTE: 判断是否会返回-1，这取决于当前进程是否有一个符合要求的子进程。
     // 当传入的pid为-1的时候，任何一个子进程都算是符合要求；
@@ -142,7 +142,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
         .any(|p| pid == -1 || pid as usize == p.getpid())
     {
         return -1;
-        // ---- release current PCB
+        // ---- Release current PCB
     }
     let pair = inner.children.iter().enumerate().find(|(_, p)| {
         // ++++ temporarily access child PCB exclusively
@@ -151,7 +151,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
     });
     if let Some((idx, _)) = pair {
         let child = inner.children.remove(idx);
-        // confirm that child will be deallocated after being removed from children list
+        // Confirm that child will be deallocated after being removed from children list
         assert_eq!(Arc::strong_count(&child), 1);
         let found_pid = child.getpid();
         // ++++ temporarily access child PCB exclusively
@@ -163,7 +163,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
         // NOTE: 找不到僵尸进程，返回-2
         -2
     }
-    // ---- release current PCB automatically
+    // ---- Release current PCB automatically
 }
 
 /// Implement in [CH3], re implement in [CH5]
@@ -238,11 +238,11 @@ pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
         "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    if start % PAGE_SIZE != 0 /* start need to be page aligned */ ||
-        port & !0x7 != 0 /* other bits of needs to be zero */ ||
+    if start % PAGE_SIZE != 0 /* Start need to be page aligned */ ||
+        port & !0x7 != 0 /* Other bits of needs to be zero */ ||
         port & 0x7 == 0 /* No permission set, meaningless */ ||
         start >= MAXVA
-    /* mapping range should be an legal address */
+    /* Mapping range should be a legal address */
     {
         return -1;
     }
@@ -288,7 +288,7 @@ pub fn sys_munmap(start: usize, len: usize) -> isize {
     unmap_consecutive_area(start, mlen)
 }
 
-/// change data segment size
+/// Change data segment size
 pub fn sys_sbrk(size: i32) -> isize {
     trace!("kernel:pid[{}] sys_sbrk", current_task().unwrap().pid.0);
     if let Some(old_brk) = current_task().unwrap().change_program_brk(size) {
@@ -298,9 +298,14 @@ pub fn sys_sbrk(size: i32) -> isize {
     }
 }
 
-/// YOUR JOB: Implement spawn.
-/// HINT: fork + exec =/= spawn
 /// Implement in [CH5]
+/// `syscall ID`: 400
+/// **Function:** Create a new child process and execute the target program.
+/// **Description:** Returns the child process ID upon success, or -1 otherwise.
+/// **Possible Errors:**
+/// * Invalid file name.
+/// * Process pool full/insufficient memory/resources error.
+/// XXX: Maybe Wrong! Pass 8/15(+6) test
 pub fn sys_spawn(path: *const u8) -> isize {
     trace!(
         "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
@@ -339,6 +344,8 @@ pub fn sys_spawn(path: *const u8) -> isize {
                     user_time: 0,
                     kernel_time: 0,
                     checkpoint: get_time_ms(), // Give the new process a new start point
+                    stride: 0,
+                    priority: 16,
                 })
             },
         });
@@ -362,11 +369,21 @@ pub fn sys_spawn(path: *const u8) -> isize {
     }
 }
 
-// YOUR JOB: Set task priority.
-pub fn sys_set_priority(_prio: isize) -> isize {
+/// `syscall ID:` 140
+/// Set the current process priority to `prio`
+/// **Parameter**: `prio` is the process priority, must be `prio >= 2`
+/// **Return value**: Returns `prio` if the input is valid; otherwise, `returns -1`.
+/// XXX: Maybe Wrong!
+pub fn sys_set_priority(prio: isize) -> isize {
     trace!(
         "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    // Must be `prio >= 2`
+    if prio <= 1 {
+        return -1;
+    }
+    let task = current_task().unwrap();
+    task.inner.exclusive_access().set_priority(prio as u64);
+    prio
 }

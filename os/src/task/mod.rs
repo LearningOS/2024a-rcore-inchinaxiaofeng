@@ -159,7 +159,6 @@ pub fn add_initproc() {
 
 /// Implement in [CH5]
 /// Count for time
-///
 pub fn user_time_start() {
     let task = current_task().unwrap();
     let mut task_inner = task.inner_exclusive_access();

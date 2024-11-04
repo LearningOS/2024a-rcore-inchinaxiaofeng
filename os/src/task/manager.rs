@@ -1,5 +1,6 @@
 //!Implementation of [`TaskManager`]
-use super::TaskControlBlock;
+use super::{TaskControlBlock, TaskStatus};
+use crate::config::BIG_STRIDE;
 use crate::sync::UPSafeCell;
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
@@ -18,7 +19,7 @@ pub struct TaskManager {
 // NOTE: 在这里，add和fetch组合形成了最简单的RR算法
 /// A simple FIFO scheduler.
 impl TaskManager {
-    ///Creat an empty TaskManager
+    ///Create an empty TaskManager
     pub fn new() -> Self {
         Self {
             ready_queue: VecDeque::new(),
@@ -29,10 +30,33 @@ impl TaskManager {
     pub fn add(&mut self, task: Arc<TaskControlBlock>) {
         self.ready_queue.push_back(task);
     }
+
     // NOTE: 从队头中取出一个任务来执行
+    /// Implement in [CH5]
     /// Take a process out of the ready queue
+    /// In this function, the `stride strategy` is implemented to replace the basic `FIFO strategy`.
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
-        self.ready_queue.pop_front()
+        // FIFO strategy
+        // `self.ready_queue.pop_front()`
+
+        // Stride strategy
+        let mut min_index = 0;
+        let mut min_stride = 0x7FFF_FFFF;
+        for (idx, task) in self.ready_queue.iter().enumerate() {
+            let inner = task.inner.exclusive_access();
+            if inner.get_status() == TaskStatus::Ready {
+                if inner.stride < min_stride {
+                    min_stride = inner.stride;
+                    min_index = idx;
+                }
+            }
+        }
+
+        if let Some(task) = self.ready_queue.get(min_index) {
+            let mut inner = task.inner.exclusive_access();
+            inner.stride += BIG_STRIDE / inner.priority;
+        }
+        self.ready_queue.remove(min_index)
     }
 }
 
@@ -45,13 +69,11 @@ lazy_static! {
 // NOTE: 给内核其他的子模块提供的函数
 /// Add process to ready queue
 pub fn add_task(task: Arc<TaskControlBlock>) {
-    //trace!("kernel: TaskManager::add_task");
     TASK_MANAGER.exclusive_access().add(task);
 }
 
 // NOTE: 给内核其他的子模块提供的函数
 /// Take a process out of the ready queue
 pub fn fetch_task() -> Option<Arc<TaskControlBlock>> {
-    //trace!("kernel: TaskManager::fetch_task");
     TASK_MANAGER.exclusive_access().fetch()
 }
