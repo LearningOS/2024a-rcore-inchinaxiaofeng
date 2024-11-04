@@ -18,6 +18,7 @@ use crate::config::{TRAMPOLINE, TRAP_CONTEXT_BASE};
 use crate::syscall::syscall;
 use crate::task::{
     current_trap_cx, current_user_token, exit_current_and_run_next, suspend_current_and_run_next,
+    update_current_task_times, user_time_end, user_time_start,
 };
 use crate::timer::set_next_trigger;
 use core::arch::{asm, global_asm};
@@ -53,9 +54,17 @@ pub fn enable_timer_interrupt() {
     }
 }
 
+/// Update in [CH5]
+/// Count time for task,
+/// First, call `user_time_start()` for start of the timer.
+/// Then, call `update_current_task_times(syscall_id)` if exception is UserEnvCall.
+/// Last, call `user_time_end()` for end of the timer.
 /// trap handler
 #[no_mangle]
 pub fn trap_handler() -> ! {
+    // Implement in [CH5], for time count
+    user_time_start();
+
     set_kernel_trap_entry();
     let scause = scause::read();
     let stval = stval::read();
@@ -70,6 +79,10 @@ pub fn trap_handler() -> ! {
             // 为了能处理类似的情况，我们要在syscall返回之后，重新获取`cx`，目前实现如下：
             // jump to next instruction anyway
             let mut cx = current_trap_cx();
+            // Implement in [CH5], for `sys_task_info`
+            let syscall_id = cx.x[17];
+            update_current_task_times(syscall_id);
+
             cx.sepc += 4;
             // get system call return value
             let result = syscall(cx.x[17], [cx.x[10], cx.x[11], cx.x[12]]);
@@ -112,7 +125,9 @@ pub fn trap_handler() -> ! {
             );
         }
     }
-    //println!("before trap_return");
+    // Implement in [CH5], for time count
+    user_time_end();
+
     trap_return();
 }
 

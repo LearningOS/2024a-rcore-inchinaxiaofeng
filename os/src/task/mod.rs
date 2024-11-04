@@ -36,7 +36,10 @@ pub use processor::{
     Processor,
 };
 
+use crate::config::MAX_SYSCALL_NUM;
+
 // NOTE: 进行了修改
+/// Add kernel cost time update logic for [CH5] use `update_checkpoint()`
 /// Suspend the current 'Running' task and run the next task in task list.
 pub fn suspend_current_and_run_next() {
     // NOTE: 首先通过`task_current_task`来取出当前执行的任务，
@@ -49,6 +52,10 @@ pub fn suspend_current_and_run_next() {
     let task_cx_ptr = &mut task_inner.task_cx as *mut TaskContext;
     // Change status to Ready
     task_inner.task_status = TaskStatus::Ready;
+    // Implement for [CH5]
+    // Update kernel cost time
+    task_inner.kernel_time += task_inner.update_checkpoint();
+
     drop(task_inner);
     // ---- release current PCB
 
@@ -63,6 +70,7 @@ pub fn suspend_current_and_run_next() {
 /// pid of usertests app in make run TEST=1
 pub const IDLE_PID: usize = 0;
 
+/// Add kernel cost time update logic for [CH5] use `update_checkpoint()`
 /// Exit the current 'Running' task and run the next task in task list.
 pub fn exit_current_and_run_next(exit_code: i32) {
     // NOTE: 调用`take_current_task`来将当前进程控制块从处理器监控`PROCESSOR`中取出，
@@ -108,6 +116,11 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     // 而用来存放页表的那些物理页帧此时则不会被回收
     // deallocate user space
     inner.memory_set.recycle_data_pages();
+
+    // Implement for [CH5]
+    // Update kernel time cost
+    inner.kernel_time += inner.update_checkpoint();
+
     drop(inner);
     // **** release current PCB
     // drop task manually to maintain rc correctly
@@ -139,4 +152,55 @@ lazy_static! {
 ///Add init process to the manager
 pub fn add_initproc() {
     add_task(INITPROC.clone());
+}
+
+/// Implement in [CH5]
+/// Count for time
+///
+pub fn user_time_start() {
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+    task_inner.kernel_time += task_inner.update_checkpoint();
+}
+
+/// Implement in [CH5]
+/// Count for time
+pub fn user_time_end() {
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+    task_inner.user_time += task_inner.update_checkpoint();
+}
+
+/// Implement in [CH3], re implement in [CH5] and split as 3 part
+/// TaskControlBlock in chapter4 contains 'MemorySet' and other fields
+/// which cannot derive 'Clone' and 'Copy' traits. Therefore, we need to
+/// split the variables into separate parts
+pub fn get_current_task_status() -> TaskStatus {
+    let task = current_task().unwrap();
+    let task_inner = task.inner_exclusive_access();
+    task_inner.get_status()
+}
+
+/// Implement in [CH3], re implement in [CH5] and split as 3 part
+pub fn get_current_task_syscall_times() -> [u32; MAX_SYSCALL_NUM] {
+    let task = current_task().unwrap();
+    let task_inner = task.inner_exclusive_access();
+    task_inner.syscall_times
+}
+
+/// Implement in [CH3], re implement in [CH5], but change the function name
+/// *Old function name*: `current_task_do_syscall()`
+/// When the system is dispatched, you'll need to call this function every time.
+pub fn update_current_task_times(syscall_id: usize) {
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+    task_inner.syscall_times[syscall_id] += 1;
+}
+
+/// Implement in [CH5]
+/// Count task time, which is kernel time + user time
+pub fn get_current_task_time_cost() -> usize {
+    let task = current_task().unwrap();
+    let task_inner = task.inner_exclusive_access();
+    task_inner.user_time + task_inner.kernel_time
 }

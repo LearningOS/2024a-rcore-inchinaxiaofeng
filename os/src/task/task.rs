@@ -1,9 +1,10 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-use crate::config::TRAP_CONTEXT_BASE;
+use crate::config::{MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE};
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
+use crate::timer::get_time_ms;
 use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
@@ -85,6 +86,19 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// Implement in [CH3], re implement in [CH5], task system call times
+    pub syscall_times: [u32; MAX_SYSCALL_NUM],
+
+    /// Implement in [CH5], only for `get_current_task_time_cost()` yet
+    pub user_time: usize,
+
+    /// Implement in [CH5], only for `get_current_task_time_cost()` yet
+    pub kernel_time: usize,
+
+    /// Implement in [CH5], use for time.
+    /// Record time point.
+    pub checkpoint: usize,
 }
 
 // NOTE: 提供的方法主要是对于它内部字段的快捷访问
@@ -97,11 +111,21 @@ impl TaskControlBlockInner {
     pub fn get_user_token(&self) -> usize {
         self.memory_set.token()
     }
-    fn get_status(&self) -> TaskStatus {
+    /// Change in [CH5]
+    /// get_status原本是一个私有函数，为了实现sys_task_info，
+    /// 将其修改为pub，用于获取当前Task的`TaskStatus`
+    pub fn get_status(&self) -> TaskStatus {
         self.task_status
     }
     pub fn is_zombie(&self) -> bool {
         self.get_status() == TaskStatus::Zombie
+    }
+    /// Implement in [CH5]
+    /// Update time checkpoint and return the delta time
+    pub fn update_checkpoint(&mut self) -> usize {
+        let prev_point = self.checkpoint;
+        self.checkpoint = get_time_ms();
+        return self.checkpoint - prev_point;
     }
 }
 
@@ -145,6 +169,10 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    syscall_times: [0; MAX_SYSCALL_NUM],
+                    user_time: 0,
+                    kernel_time: 0,
+                    checkpoint: 0,
                 })
             },
         };
@@ -228,6 +256,10 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    syscall_times: [0; MAX_SYSCALL_NUM],
+                    user_time: 0,
+                    kernel_time: 0,
+                    checkpoint: get_time_ms(),
                 })
             },
         });

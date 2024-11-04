@@ -50,6 +50,11 @@ impl Processor {
     pub fn current(&self) -> Option<Arc<TaskControlBlock>> {
         self.current.as_ref().map(Arc::clone)
     }
+
+    /// TODO
+    /// Implement in CH3, re implement in CH5
+    /// When current task do a system call, call this function to add times
+    pub fn current_task_do_syscall(&self, _syscall_id: usize) {}
 }
 
 // NOTE: 单个`Processor`的全局实例`PROCESSOR`
