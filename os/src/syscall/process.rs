@@ -150,9 +150,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
         // ++++ release child PCB
     });
     if let Some((idx, _)) = pair {
-        let child = inner.children.remove(idx);
-        // Confirm that child will be deallocated after being removed from children list
-        assert_eq!(Arc::strong_count(&child), 1);
+        let child = inner.children.remove(idx); // Confirm that child will be deallocated after being removed from children list assert_eq!(Arc::strong_count(&child), 1);
         let found_pid = child.getpid();
         // ++++ temporarily access child PCB exclusively
         let exit_code = child.inner_exclusive_access().exit_code;
@@ -167,7 +165,6 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 }
 
 /// Implement in [CH3], re implement in [CH5]
-/// XXX: Maybe Wrong! Not pass any test.
 pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
@@ -200,7 +197,6 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
 /// * `get_current_task_status()`
 /// * `get_current_task_syscall_times()`
 /// * `get_current_task_time_cost()`
-/// XXX: Maybe Wrong! Not pass any test.
 pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
     trace!(
         "kernel:pid[{}] sys_task_info NOT IMPLEMENTED",
@@ -232,7 +228,6 @@ pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
 
 /// Implement in [CH5], function `mmap()`.
 /// `Mmap` the mapped virtual address
-/// XXX: Maybe Wrong! Not pass any test.
 pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
@@ -271,7 +266,6 @@ pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
 
 /// Implement in [CH5]
 /// `Munmap` the mapped virtual address
-/// XXX: Maybe Wrong! Not pass any test.
 pub fn sys_munmap(start: usize, len: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
@@ -305,9 +299,6 @@ pub fn sys_sbrk(size: i32) -> isize {
 /// **Possible Errors:**
 /// * Invalid file name.
 /// * Process pool full/insufficient memory/resources error.
-/// XXX: Maybe Wrong! Pass 8/15(+6) test
-/// FIXME: 多个副本的问题？为什么在id中current id会不一致呢？
-/// TODO: 学fork去写！！
 pub fn sys_spawn(path: *const u8) -> isize {
     let task = current_task().unwrap();
     let mut parent_inner = task.inner_exclusive_access();
@@ -371,7 +362,6 @@ pub fn sys_spawn(path: *const u8) -> isize {
 /// Set the current process priority to `prio`
 /// **Parameter**: `prio` is the process priority, must be `prio >= 2`
 /// **Return value**: Returns `prio` if the input is valid; otherwise, `returns -1`.
-/// XXX: Maybe Wrong!
 pub fn sys_set_priority(prio: isize) -> isize {
     trace!(
         "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
