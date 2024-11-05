@@ -11,7 +11,7 @@ use crate::{
     task::{
         add_task, create_new_map_area, current_task, current_user_token, exit_current_and_run_next,
         get_current_task_page_table, get_current_task_status, get_current_task_syscall_times,
-        pid_alloc, suspend_current_and_run_next, unmap_consecutive_area, KernelStack, TaskContext,
+        kstack_alloc, pid_alloc, suspend_current_and_run_next, unmap_consecutive_area, TaskContext,
         TaskControlBlock, TaskControlBlockInner, TaskStatus,
     },
     timer::{get_time_ms, get_time_us},
@@ -306,11 +306,9 @@ pub fn sys_sbrk(size: i32) -> isize {
 /// * Invalid file name.
 /// * Process pool full/insufficient memory/resources error.
 /// XXX: Maybe Wrong! Pass 8/15(+6) test
+/// FIXME: 多个副本的问题？为什么在id中current id会不一致呢？
+/// TODO: 学fork去写！！
 pub fn sys_spawn(path: *const u8) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
     let task = current_task().unwrap();
     let mut parent_inner = task.inner_exclusive_access();
     let token = parent_inner.memory_set.token();
@@ -321,9 +319,9 @@ pub fn sys_spawn(path: *const u8) -> isize {
             .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
             .unwrap()
             .ppn();
-        // Allocate a pid and a kernel stack in kernel space
+        // Alloc a pid and a kernel stack in kernel space
         let pid_handle = pid_alloc();
-        let kernel_stack = KernelStack::new(&pid_handle);
+        let kernel_stack = kstack_alloc();
         let kernel_stack_top = kernel_stack.get_top();
         let task_control_block = Arc::new(TaskControlBlock {
             pid: pid_handle,
@@ -343,7 +341,7 @@ pub fn sys_spawn(path: *const u8) -> isize {
                     syscall_times: [0; MAX_SYSCALL_NUM],
                     user_time: 0,
                     kernel_time: 0,
-                    checkpoint: get_time_ms(), // Give the new process a new start point
+                    checkpoint: get_time_ms(),
                     stride: 0,
                     priority: 16,
                 })

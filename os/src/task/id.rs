@@ -59,7 +59,6 @@ pub struct PidHandle(pub usize);
 // NOTE: 实现Drop特征以允许编译器进行自动资源回收
 impl Drop for PidHandle {
     fn drop(&mut self) {
-        //println!("drop pid {}", self.0);
         PID_ALLOCATOR.exclusive_access().dealloc(self.0);
     }
 }
