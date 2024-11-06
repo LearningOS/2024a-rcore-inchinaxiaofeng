@@ -22,13 +22,18 @@ mod switch;
 #[allow(rustdoc::private_intra_doc_links)]
 mod task;
 
-use crate::fs::{open_file, OpenFlags};
+use crate::{
+    config::MAX_SYSCALL_NUM,
+    fs::{open_file, OpenFlags},
+    mm::{MapPermission, PageTableEntry, VPNRange, VirtAddr, VirtPageNum},
+};
 use alloc::sync::Arc;
 pub use context::TaskContext;
 use lazy_static::*;
 pub use manager::{fetch_task, TaskManager};
 use switch::__switch;
-pub use task::{TaskControlBlock, TaskStatus};
+/// Change in [CH5], add `TaskControlBlockInner` as pub
+pub use task::{TaskControlBlock, TaskControlBlockInner, TaskStatus};
 
 pub use id::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 pub use manager::add_task;
@@ -119,4 +124,92 @@ lazy_static! {
 ///Add init process to the manager
 pub fn add_initproc() {
     add_task(INITPROC.clone());
+}
+
+/// Implement in [CH5]
+/// Count for time
+pub fn user_time_start() {
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+    task_inner.kernel_time += task_inner.update_checkpoint();
+}
+
+/// Implement in [CH5]
+/// Count for time
+pub fn user_time_end() {
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+    task_inner.user_time += task_inner.update_checkpoint();
+}
+
+/// Implement in [CH3], re implement in [CH5] and split as 3 part
+/// TaskControlBlock in chapter4 contains `MemorySet` and other fields
+/// which cannot derive 'Clone' and 'Copy' traits. Therefore, we need to
+/// split the variables into separate parts
+pub fn get_current_task_status() -> TaskStatus {
+    let task = current_task().unwrap();
+    let task_inner = task.inner_exclusive_access();
+    task_inner.get_status()
+}
+
+/// Implement in [CH3], re implement in [CH5] and split as 3 part
+pub fn get_current_task_syscall_times() -> [u32; MAX_SYSCALL_NUM] {
+    let task = current_task().unwrap();
+    let task_inner = task.inner_exclusive_access();
+    task_inner.syscall_times
+}
+
+/// Implement in [CH3], re implement in [CH5], but change the function name
+/// *Old function name*: `current_task_do_syscall()`
+/// When the system is dispatched, you'll need to call this function every time.
+pub fn update_current_task_times(syscall_id: usize) {
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+    task_inner.syscall_times[syscall_id] += 1;
+}
+
+/// Implement in [CH5]
+/// Count task time, which is kernel time + user time
+pub fn get_current_task_time_cost() -> usize {
+    let task = current_task().unwrap();
+    let task_inner = task.inner_exclusive_access();
+    task_inner.user_time + task_inner.kernel_time
+}
+
+/// Implement in [CH5]
+/// Get `PageTableEntry` by a `vpn`
+pub fn get_current_task_page_table(vpn: VirtPageNum) -> Option<PageTableEntry> {
+    let task = current_task().unwrap();
+    let task_inner = task.inner_exclusive_access();
+    task_inner.memory_set.translate(vpn)
+}
+
+/// Implement in [CH5]
+pub fn create_new_map_area(start_va: VirtAddr, end_va: VirtAddr, perm: MapPermission) {
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+    task_inner
+        .memory_set
+        .insert_framed_area(start_va, end_va, perm);
+}
+
+/// Implement in [CH5]
+pub fn unmap_consecutive_area(start: usize, len: usize) -> isize {
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+    let start_vpn = VirtAddr::from(start).floor();
+    let end_vpn = VirtAddr::from(start + len).ceil();
+    let vpns = VPNRange::new(start_vpn, end_vpn);
+    for vpn in vpns {
+        if let Some(pte) = task_inner.memory_set.translate(vpn) {
+            if !pte.is_valid() {
+                return -1;
+            }
+            task_inner.memory_set.get_page_table().unmap(vpn);
+        } else {
+            // Also `unmapped` if no PTE found
+            return -1;
+        }
+    }
+    0
 }

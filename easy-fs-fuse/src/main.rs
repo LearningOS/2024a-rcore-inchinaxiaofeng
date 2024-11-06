@@ -58,7 +58,7 @@ fn easy_fs_pack() -> std::io::Result<()> {
         f.set_len(16 * 2048 * 512).unwrap();
         f
     })));
-    // 16MiB, at most 4095 files
+    // 16`MiB`, at most 4095 files
     let efs = EasyFileSystem::create(block_file, 16 * 2048, 1);
     let root_inode = Arc::new(EasyFileSystem::root_inode(&efs));
     let apps: Vec<_> = read_dir(src_path)
@@ -71,19 +71,21 @@ fn easy_fs_pack() -> std::io::Result<()> {
         })
         .collect();
     for app in apps {
-        // load app data from host file system
+        // Load app data from host file system
         let mut host_file = File::open(format!("{}{}", target_path, app)).unwrap();
         let mut all_data: Vec<u8> = Vec::new();
         host_file.read_to_end(&mut all_data).unwrap();
-        // create a file in easy-fs
+        // Create a file in easy-fs
         let inode = root_inode.create(app.as_str()).unwrap();
-        // write data to easy-fs
+        // Write data to easy-fs
         inode.write_at(0, all_data.as_slice());
     }
-    // list apps
+    // List apps
+    // ```
     // for app in root_inode.ls() {
     //     println!("{}", app);
     // }
+    // ```
     Ok(())
 }
 
@@ -109,7 +111,7 @@ fn efs_test() -> std::io::Result<()> {
     let filea = root_inode.find("filea").unwrap();
     let greet_str = "Hello, world!";
     filea.write_at(0, greet_str.as_bytes());
-    //let mut buffer = [0u8; 512];
+    //`let mut buffer = [0u8; 512];`
     let mut buffer = [0u8; 233];
     let len = filea.read_at(0, &mut buffer);
     assert_eq!(greet_str, core::str::from_utf8(&buffer[..len]).unwrap(),);
@@ -119,7 +121,7 @@ fn efs_test() -> std::io::Result<()> {
         assert_eq!(filea.read_at(0, &mut buffer), 0,);
         let mut str = String::new();
         use rand;
-        // random digit
+        // Random digit
         for _ in 0..len {
             str.push(char::from('0' as u8 + rand::random::<u8>() % 10));
         }

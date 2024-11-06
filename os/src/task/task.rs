@@ -1,10 +1,11 @@
-//! Types related to task management & Functions for completely changing TCB
+//! Types related to task management & Functions for completely changing `TCB`
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-use crate::config::TRAP_CONTEXT_BASE;
+use crate::config::{MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE};
 use crate::fs::{File, Stdin, Stdout};
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
+use crate::timer::get_time_ms;
 use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
@@ -23,11 +24,12 @@ pub struct TaskControlBlock {
     pub kernel_stack: KernelStack,
 
     /// Mutable
-    inner: UPSafeCell<TaskControlBlockInner>,
+    /// Change in [CH5], from private to public
+    pub inner: UPSafeCell<TaskControlBlockInner>,
 }
 
 impl TaskControlBlock {
-    /// Get the mutable reference of the inner TCB
+    /// Get the mutable reference of the inner `TCB`
     pub fn inner_exclusive_access(&self) -> RefMut<'_, TaskControlBlockInner> {
         self.inner.exclusive_access()
     }
@@ -38,6 +40,7 @@ impl TaskControlBlock {
     }
 }
 
+/// TaskControlBlockInner
 pub struct TaskControlBlockInner {
     /// The physical page number of the frame where the trap context is placed
     pub trap_cx_ppn: PhysPageNum,
@@ -59,11 +62,16 @@ pub struct TaskControlBlockInner {
     /// Weak will not affect the reference count of the parent
     pub parent: Option<Weak<TaskControlBlock>>,
 
-    /// A vector containing TCBs of all child processes of the current process
+    /// A vector containing `TCBs` of all child processes of the current process
     pub children: Vec<Arc<TaskControlBlock>>,
 
     /// It is set when active exit or execution error occurs
     pub exit_code: i32,
+    /// `fd_table`,这里包含多层嵌套，从里到外分别为：
+    /// * `Vec`的动态特性使得我们无需设置一个固定的FD数量上限
+    /// * `Option`以此区分一个FD当前是否空闲，`None`的时候是空闲的，`Some`则代表它已经被占用
+    /// * `Arc`首先提供了共享引用的能力。可能会有多个进程共享同一个文件对他进行读写。被`Arc`包裹的内容会被放到内核堆上而不是栈上，于是它便不需要在编译期有确定的大小
+    /// * `dyn`关键字表明`Arc`里面的类型实现了`File/Send/Sync`三个Trait，但是编译期无法知道它具体是哪个类型，需要等到运行时才能知道它具体类型
     pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
 
     /// Heap bottom
@@ -71,21 +79,47 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// Implement in [CH3], re implement in [CH5], task system call times
+    pub syscall_times: [u32; MAX_SYSCALL_NUM],
+
+    /// Implement in [CH5], only for `get_current_task_time_cost()` yet
+    pub user_time: usize,
+
+    /// Implement in [CH5], only for `get_current_task_time_cost()` yet
+    pub kernel_time: usize,
+
+    /// Implement in [CH5], use for time.
+    /// Record time point.
+    pub checkpoint: usize,
+
+    /// Implement in [CH5], for `sys_set_prio`
+    pub stride: u64,
+
+    /// Implement in [CH5], for `sys_get_prio`
+    pub priority: u64,
 }
 
 impl TaskControlBlockInner {
+    /// TODO
     pub fn get_trap_cx(&self) -> &'static mut TrapContext {
         self.trap_cx_ppn.get_mut()
     }
+    /// TODO
     pub fn get_user_token(&self) -> usize {
         self.memory_set.token()
     }
-    fn get_status(&self) -> TaskStatus {
+    /// Change in [CH5]
+    /// get_status原本是一个私有函数，为了实现`sys_task_info`，
+    /// 将其修改为pub，用于获取当前Task的`TaskStatus`
+    pub fn get_status(&self) -> TaskStatus {
         self.task_status
     }
+    /// TODO
     pub fn is_zombie(&self) -> bool {
         self.get_status() == TaskStatus::Zombie
     }
+    /// TODO
     pub fn alloc_fd(&mut self) -> usize {
         if let Some(fd) = (0..self.fd_table.len()).find(|fd| self.fd_table[*fd].is_none()) {
             fd
@@ -94,24 +128,36 @@ impl TaskControlBlockInner {
             self.fd_table.len() - 1
         }
     }
+    /// Implement in [CH5]
+    /// Update time checkpoint and return the delta time
+    pub fn update_checkpoint(&mut self) -> usize {
+        let prev_point = self.checkpoint;
+        self.checkpoint = get_time_ms();
+        return self.checkpoint - prev_point;
+    }
+    /// Implement in [CH5]
+    /// Set the priority of stride
+    pub fn set_priority(&mut self, level: u64) {
+        self.priority = level;
+    }
 }
 
 impl TaskControlBlock {
     /// Create a new process
     ///
-    /// At present, it is only used for the creation of initproc
+    /// At present, it is only used for the creation of `initproc`
     pub fn new(elf_data: &[u8]) -> Self {
-        // memory_set with elf program headers/trampoline/trap context/user stack
+        // Memory_set with elf program headers/trampoline/trap context/user stack
         let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
         let trap_cx_ppn = memory_set
             .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
             .unwrap()
             .ppn();
-        // alloc a pid and a kernel stack in kernel space
+        // Alloc a pid and a kernel stack in kernel space
         let pid_handle = pid_alloc();
         let kernel_stack = kstack_alloc();
         let kernel_stack_top = kernel_stack.get_top();
-        // push a task context which goes to trap_return to the top of kernel stack
+        // Push a task context which goes to trap_return to the top of kernel stack
         let task_control_block = Self {
             pid: pid_handle,
             kernel_stack,
@@ -126,19 +172,25 @@ impl TaskControlBlock {
                     children: Vec::new(),
                     exit_code: 0,
                     fd_table: vec![
-                        // 0 -> stdin
+                        // 0 -> `stdin`
                         Some(Arc::new(Stdin)),
-                        // 1 -> stdout
+                        // 1 -> `stdout`
                         Some(Arc::new(Stdout)),
-                        // 2 -> stderr
+                        // 2 -> `stderr`
                         Some(Arc::new(Stdout)),
                     ],
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    syscall_times: [0; MAX_SYSCALL_NUM],
+                    user_time: 0,
+                    kernel_time: 0,
+                    checkpoint: 0,
+                    stride: 0,
+                    priority: 16,
                 })
             },
         };
-        // prepare TrapContext in user space
+        // Prepare TrapContext in user space
         let trap_cx = task_control_block.inner_exclusive_access().get_trap_cx();
         *trap_cx = TrapContext::app_init_context(
             entry_point,
@@ -152,20 +204,20 @@ impl TaskControlBlock {
 
     /// Load a new elf to replace the original application address space and start execution
     pub fn exec(&self, elf_data: &[u8]) {
-        // memory_set with elf program headers/trampoline/trap context/user stack
+        // Memory_set with elf program headers/trampoline/trap context/user stack
         let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
         let trap_cx_ppn = memory_set
             .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
             .unwrap()
             .ppn();
 
-        // **** access current TCB exclusively
+        // **** Access current `TCB` exclusively
         let mut inner = self.inner_exclusive_access();
-        // substitute memory_set
+        // Substitute memory_set
         inner.memory_set = memory_set;
-        // update trap_cx ppn
+        // Update `trap_cx` ppn
         inner.trap_cx_ppn = trap_cx_ppn;
-        // initialize trap_cx
+        // Initialize `trap_cx`
         let trap_cx = TrapContext::app_init_context(
             entry_point,
             user_sp,
@@ -174,24 +226,24 @@ impl TaskControlBlock {
             trap_handler as usize,
         );
         *inner.get_trap_cx() = trap_cx;
-        // **** release current PCB
+        // **** Release current PCB
     }
 
-    /// parent process fork the child process
+    /// Parent process fork the child process
     pub fn fork(self: &Arc<TaskControlBlock>) -> Arc<TaskControlBlock> {
-        // ---- hold parent PCB lock
+        // ---- Hold parent PCB lock
         let mut parent_inner = self.inner_exclusive_access();
-        // copy user space(include trap context)
+        // Copy user space(include trap context)
         let memory_set = MemorySet::from_existed_user(&parent_inner.memory_set);
         let trap_cx_ppn = memory_set
             .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
             .unwrap()
             .ppn();
-        // alloc a pid and a kernel stack in kernel space
+        // Alloc a pid and a kernel stack in kernel space
         let pid_handle = pid_alloc();
         let kernel_stack = kstack_alloc();
         let kernel_stack_top = kernel_stack.get_top();
-        // copy fd table
+        // Copy fd table
         let mut new_fd_table: Vec<Option<Arc<dyn File + Send + Sync>>> = Vec::new();
         for fd in parent_inner.fd_table.iter() {
             if let Some(file) = fd {
@@ -216,27 +268,33 @@ impl TaskControlBlock {
                     fd_table: new_fd_table,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    syscall_times: [0; MAX_SYSCALL_NUM],
+                    user_time: 0,
+                    kernel_time: 0,
+                    checkpoint: get_time_ms(),
+                    stride: 0,
+                    priority: 16,
                 })
             },
         });
-        // add child
+        // Add child
         parent_inner.children.push(task_control_block.clone());
-        // modify kernel_sp in trap_cx
-        // **** access child PCB exclusively
+        // Modify `kernel_sp` in `trap_cx`
+        // **** Access child PCB exclusively
         let trap_cx = task_control_block.inner_exclusive_access().get_trap_cx();
         trap_cx.kernel_sp = kernel_stack_top;
-        // return
+        // Return
         task_control_block
-        // **** release child PCB
-        // ---- release parent PCB
+        // **** Release child PCB
+        // ---- Release parent PCB
     }
 
-    /// get pid of process
+    /// Get pid of process
     pub fn getpid(&self) -> usize {
         self.pid.0
     }
 
-    /// change the location of the program break. return None if failed.
+    /// Change the location of the program break. Return None if failed.
     pub fn change_program_brk(&self, size: i32) -> Option<usize> {
         let mut inner = self.inner_exclusive_access();
         let heap_bottom = inner.heap_bottom;
@@ -264,14 +322,14 @@ impl TaskControlBlock {
 }
 
 #[derive(Copy, Clone, PartialEq)]
-/// task status: UnInit, Ready, Running, Exited
+/// Task status: UnInit, Ready, Running, Exited
 pub enum TaskStatus {
-    /// uninitialized
+    /// Uninitialized
     UnInit,
-    /// ready to run
+    /// Ready to run
     Ready,
-    /// running
+    /// Running
     Running,
-    /// exited
+    /// Exited
     Zombie,
 }

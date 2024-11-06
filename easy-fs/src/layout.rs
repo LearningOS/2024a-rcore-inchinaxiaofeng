@@ -5,25 +5,29 @@ use core::fmt::{Debug, Formatter, Result};
 
 /// Magic number for sanity check
 const EFS_MAGIC: u32 = 0x3b800001;
-/// The max number of direct inodes
+/// The max number of direct `inodes`
 const INODE_DIRECT_COUNT: usize = 28;
-/// The max length of inode name
+/// The max length of `inode` name
 const NAME_LENGTH_LIMIT: usize = 27;
-/// The max number of indirect1 inodes
+/// The max number of indirect1 `inodes`
 const INODE_INDIRECT1_COUNT: usize = BLOCK_SZ / 4;
-/// The max number of indirect2 inodes
+/// The max number of indirect2 `inodes`
 const INODE_INDIRECT2_COUNT: usize = INODE_INDIRECT1_COUNT * INODE_INDIRECT1_COUNT;
-/// The upper bound of direct inode index
+/// The upper bound of direct `inode` index
 const DIRECT_BOUND: usize = INODE_DIRECT_COUNT;
-/// The upper bound of indirect1 inode index
+/// The upper bound of indirect1 `inode` index
 const INDIRECT1_BOUND: usize = DIRECT_BOUND + INODE_INDIRECT1_COUNT;
-/// The upper bound of indirect2 inode indexs
+/// The upper bound of indirect2 `inode indexs`
 #[allow(unused)]
 const INDIRECT2_BOUND: usize = INDIRECT1_BOUND + INODE_INDIRECT2_COUNT;
-/// Super block of a filesystem
+
+/// 超级块
+/// Super block of an `filesystem`
 #[repr(C)]
 pub struct SuperBlock {
+    /// 用于文件系统合法性验证的魔数
     magic: u32,
+    /// 文件系统的总块数
     pub total_blocks: u32,
     pub inode_bitmap_blocks: u32,
     pub inode_area_blocks: u32,
@@ -45,6 +49,7 @@ impl Debug for SuperBlock {
 
 impl SuperBlock {
     /// Initialize a super block
+    /// 用于在创建一个`easy-fs`的时候初始化超级块，各个区域的块数由更上层的磁盘块管理器传入
     pub fn initialize(
         &mut self,
         total_blocks: u32,
@@ -62,12 +67,13 @@ impl SuperBlock {
             data_area_blocks,
         }
     }
-    /// Check if a super block is valid using efs magic
+    /// Check if a super block is valid using `efs` magic
+    /// 通过魔数判断超级块所在的文件系统是否合法
     pub fn is_valid(&self) -> bool {
         self.magic == EFS_MAGIC
     }
 }
-/// Type of a disk inode
+/// Type of a disk `inode`
 #[derive(PartialEq)]
 pub enum DiskInodeType {
     File,
@@ -78,43 +84,60 @@ pub enum DiskInodeType {
 type IndirectBlock = [u32; BLOCK_SZ / 4];
 /// A data block
 type DataBlock = [u8; BLOCK_SZ];
-/// A disk inode
+
+/// A disk `inode`
+/// 磁盘上索引节点
 #[repr(C)]
 pub struct DiskInode {
+    /// 文件/目录字节数
     pub size: u32,
+    /// 文件小的时候可以，只用这个就行，INODE_DIRECT_COUNT为28,可以直接索引14KiB的内容。
     pub direct: [u32; INODE_DIRECT_COUNT],
+    /// 一级间接索引，指向的是一个一级索引块，这个块也在磁盘布局的数据块区域中。
+    /// 这个一级索引块中每个`u32`都用来指向数据块区域中一个保存该文件的数据块，共128个，64KiB
     pub indirect1: u32,
+    /// 超过78KiB后，用二级间接索引，指向一个位于数据块中的二级索引块，每个`u32`指向一个不同的一级索引块，
+    /// 共索引8*64 = 8MiB的内容
     pub indirect2: u32,
+    /// 索引节点的类型`DiskInodeType`，目前仅仅支持`File`和`Directory`
     type_: DiskInodeType,
 }
 
+/// 每个文件/目录在磁盘上均以此的形式存储。
 impl DiskInode {
     /// Initialize a disk inode, as well as all direct inodes under it
     /// indirect1 and indirect2 block are allocated only when they are needed
     pub fn initialize(&mut self, type_: DiskInodeType) {
         self.size = 0;
         self.direct.iter_mut().for_each(|v| *v = 0);
+        // `indirect1/2`均被初始化为0，因为最开始内容的大小为0字节，不需要用到一级、二级索引。
+        // 为了节约空间，我们会完全按需分配一级/二级索引块。此外，直接索引`direct`也被清零。
         self.indirect1 = 0;
         self.indirect2 = 0;
         self.type_ = type_;
     }
-    /// Whether this inode is a directory
+    /// Whether this `inode` is a directory
     pub fn is_dir(&self) -> bool {
         self.type_ == DiskInodeType::Directory
     }
-    /// Whether this inode is a file
+    /// Whether this `inode` is a file
     #[allow(unused)]
     pub fn is_file(&self) -> bool {
         self.type_ == DiskInodeType::File
     }
+
     /// Return block number correspond to size.
+    /// 可以计算为了容纳自身`size`字节的内容需要多少个数据块。
+    /// 只通过`size`除以每个块的大小`BLOCK_SZ`并向上取整。
     pub fn data_blocks(&self) -> u32 {
         Self::_data_blocks(self.size)
     }
     fn _data_blocks(size: u32) -> u32 {
         (size + BLOCK_SZ as u32 - 1) / BLOCK_SZ as u32
     }
+
     /// Return number of blocks needed include indirect1/2.
+    /// 不仅包含数据块，还要统计索引块
     pub fn total_blocks(size: u32) -> u32 {
         let data_blocks = Self::_data_blocks(size) as usize;
         let mut total = data_blocks as usize;
@@ -131,23 +154,28 @@ impl DiskInode {
         }
         total as u32
     }
+    /// 可以计算将一个`DiskInode`的`size`扩容到`new_size`需要额外多少个数据和索引块。通过调用两次`total_blocks`做差实现
     /// Get the number of data blocks that have to be allocated given the new size of data
     pub fn blocks_num_needed(&self, new_size: u32) -> u32 {
         assert!(new_size >= self.size);
         Self::total_blocks(new_size) - Self::total_blocks(self.size)
     }
     /// Get id of block given inner id
+    /// 体现了`DiskInode`最重要的数据块索引功能，它可以从索引中查到它自身用于保存文件内容的第`block_id`个数据块的块编号，后续才能对这个数据块访问
     pub fn get_block_id(&self, inner_id: u32, block_device: &Arc<dyn BlockDevice>) -> u32 {
         let inner_id = inner_id as usize;
         if inner_id < INODE_DIRECT_COUNT {
+            // 直接索引
             self.direct[inner_id]
         } else if inner_id < INDIRECT1_BOUND {
+            // 一级索引
             get_block_cache(self.indirect1 as usize, Arc::clone(block_device))
                 .lock()
                 .read(0, |indirect_block: &IndirectBlock| {
                     indirect_block[inner_id - INODE_DIRECT_COUNT]
                 })
         } else {
+            // 二级索引
             let last = inner_id - INDIRECT1_BOUND;
             let indirect1 = get_block_cache(self.indirect2 as usize, Arc::clone(block_device))
                 .lock()
@@ -161,7 +189,9 @@ impl DiskInode {
                 })
         }
     }
-    /// Inncrease the size of current disk inode
+    /// `Inncrease` the size of current disk `inode`
+    /// 其中的`new_size`表示容量扩充之后的大小;
+    /// `new_blocks`是一个保存了本次容量扩充所需要块编号的向量，这些块都是由上层的磁盘块管理器负责分配的。
     pub fn increase_size(
         &mut self,
         new_size: u32,
@@ -237,6 +267,7 @@ impl DiskInode {
 
     /// Clear size to zero and return blocks that should be deallocated.
     /// We will clear the block contents to zero later.
+    /// 需要清空文件的内容并回收所有数据和索引块
     pub fn clear_size(&mut self, block_device: &Arc<dyn BlockDevice>) -> Vec<u32> {
         let mut v: Vec<u32> = Vec::new();
         let mut data_blocks = self.data_blocks() as usize;
@@ -308,7 +339,9 @@ impl DiskInode {
         self.indirect2 = 0;
         v
     }
-    /// Read data from current disk inode
+
+    /// Read data from current disk `inode`
+    /// 通过`DiskInode`来读它索引的那些数据块中的数据
     pub fn read_at(
         &self,
         offset: usize,
@@ -348,7 +381,7 @@ impl DiskInode {
         }
         read_size
     }
-    /// Write data into current disk inode
+    /// Write data into current disk `inode`
     /// size must be adjusted properly beforehand
     pub fn write_at(
         &mut self,
@@ -389,8 +422,10 @@ impl DiskInode {
     }
 }
 /// A directory entry
+/// 目录项
 #[repr(C)]
 pub struct DirEntry {
+    /// 名字不能超过27,目录项自身32字节，每个数据块可以存储16个目录项
     name: [u8; NAME_LENGTH_LIMIT + 1],
     inode_id: u32,
 }

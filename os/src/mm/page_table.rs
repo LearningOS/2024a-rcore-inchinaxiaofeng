@@ -220,17 +220,19 @@ pub fn translated_refmut<T>(token: usize, ptr: *mut T) -> &'static mut T {
 }
 
 /// An abstraction over a buffer passed from user space to kernel space
+/// 应用地址空间中的一段缓冲区，我们可以将其看作一个`&[u8]`切片
 pub struct UserBuffer {
     /// A list of buffers
     pub buffers: Vec<&'static mut [u8]>,
 }
 
 impl UserBuffer {
-    /// Constuct UserBuffer
+    /// `Constuct UserBuffer`
     pub fn new(buffers: Vec<&'static mut [u8]>) -> Self {
         Self { buffers }
     }
     /// Get the length of the buffer
+    /// 通过`len`方法可以得到缓冲区的长度
     pub fn len(&self) -> usize {
         let mut total: usize = 0;
         for b in self.buffers.iter() {
