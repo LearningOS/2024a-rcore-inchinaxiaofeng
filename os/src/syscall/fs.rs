@@ -1,4 +1,4 @@
-//! File and filesystem-related syscalls
+//! File and `filesystem-related syscalls`
 use crate::fs::{make_pipe, open_file, OpenFlags, Stat};
 use crate::mm::{translated_byte_buffer, translated_refmut, translated_str, UserBuffer};
 use crate::task::{current_task, current_user_token};
@@ -17,7 +17,7 @@ pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
             return -1;
         }
         let file = file.clone();
-        // release current task TCB manually to avoid multi-borrow
+        // Release current task `TCB` manually to avoid multi-borrow
         drop(inner);
         file.write(UserBuffer::new(translated_byte_buffer(token, buf, len))) as isize
     } else {
@@ -38,7 +38,7 @@ pub fn sys_read(fd: usize, buf: *const u8, len: usize) -> isize {
         if !file.readable() {
             return -1;
         }
-        // release current task TCB manually to avoid multi-borrow
+        // Release current task `TCB` manually to avoid multi-borrow
         drop(inner);
         trace!("kernel: sys_read .. file.read");
         file.read(UserBuffer::new(translated_byte_buffer(token, buf, len))) as isize
@@ -48,7 +48,7 @@ pub fn sys_read(fd: usize, buf: *const u8, len: usize) -> isize {
 }
 
 pub fn sys_open(path: *const u8, flags: u32) -> isize {
-	trace!("kernel:pid[{}] sys_open", current_task().unwrap().pid.0);
+    trace!("kernel:pid[{}] sys_open", current_task().unwrap().pid.0);
     let task = current_task().unwrap();
     let token = current_user_token();
     let path = translated_str(token, path);
@@ -62,8 +62,15 @@ pub fn sys_open(path: *const u8, flags: u32) -> isize {
     }
 }
 
+/// **功能**：当前进程关闭一个文件。
+/// **参数**：`fd`表示要关闭的文件的文件描述符。
+/// **返回值**：如果成功关闭则返回`0`，否则返回`-1`。可能的出错原因：传入的文件描述符并不对应一个打开的文件。
+/// `syscall ID`：`57`
 pub fn sys_close(fd: usize) -> isize {
-	trace!("kernel:pid[{}] sys_close", current_task().unwrap().pid.0);
+    trace!("kernel:pid[{}] sys_close", current_task().unwrap().pid.0);
+    // 只需将进程控制块中的文件描述符表对应的一项改为`None`代表它已经空闲即可，
+    // 同时这也会导致内层的引用计数类型`Arc`被销毁，会减少一个文件的引用计数，
+    // 当引用计数减少到`0`之后，文件所占用的资源就会被自动回收
     let task = current_task().unwrap();
     let mut inner = task.inner_exclusive_access();
     if fd >= inner.fd_table.len() {
@@ -76,23 +83,32 @@ pub fn sys_close(fd: usize) -> isize {
     0
 }
 
+/// **功能**：为当前进程打开一个管道。
+/// **参数**：`pipe`表示应用地址空间中的一个长度为`2`的`usize`数组的起始地址，内核需要按顺序将管道读端
+/// 和写端的文件描述符写入到数组中。
+/// **返回值**：如果出现了错误则返回`-1`，否则返回`0`。可能的错误原因是：传入的地址不合法。
+/// `syscall ID`：`59`
+/// 用户库会将其包装为`pipe`函数
 pub fn sys_pipe(pipe: *mut usize) -> isize {
-	trace!("kernel:pid[{}] sys_pipe", current_task().unwrap().pid.0);
+    trace!("kernel:pid[{}] sys_pipe", current_task().unwrap().pid.0);
     let task = current_task().unwrap();
     let token = current_user_token();
     let mut inner = task.inner_exclusive_access();
+    // 调用`make_pipe`创建一个管道并获取其读端与写端
     let (pipe_read, pipe_write) = make_pipe();
+    // 分别为读端与写端分配文件描述符并将它们放置在文件描述符表中相应的位置中
     let read_fd = inner.alloc_fd();
     inner.fd_table[read_fd] = Some(pipe_read);
     let write_fd = inner.alloc_fd();
     inner.fd_table[write_fd] = Some(pipe_write);
+    // 我们是将读端和写端的文件描述符写回到应用地址空间
     *translated_refmut(token, pipe) = read_fd;
     *translated_refmut(token, unsafe { pipe.add(1) }) = write_fd;
     0
 }
 
 pub fn sys_dup(fd: usize) -> isize {
-	trace!("kernel:pid[{}] sys_dup", current_task().unwrap().pid.0);
+    trace!("kernel:pid[{}] sys_dup", current_task().unwrap().pid.0);
     let task = current_task().unwrap();
     let mut inner = task.inner_exclusive_access();
     if fd >= inner.fd_table.len() {
@@ -108,18 +124,27 @@ pub fn sys_dup(fd: usize) -> isize {
 
 /// YOUR JOB: Implement fstat.
 pub fn sys_fstat(_fd: usize, _st: *mut Stat) -> isize {
-    trace!("kernel:pid[{}] sys_fstat NOT IMPLEMENTED", current_task().unwrap().pid.0);
+    trace!(
+        "kernel:pid[{}] sys_fstat NOT IMPLEMENTED",
+        current_task().unwrap().pid.0
+    );
     -1
 }
 
 /// YOUR JOB: Implement linkat.
 pub fn sys_linkat(_old_name: *const u8, _new_name: *const u8) -> isize {
-    trace!("kernel:pid[{}] sys_linkat NOT IMPLEMENTED", current_task().unwrap().pid.0);
+    trace!(
+        "kernel:pid[{}] sys_linkat NOT IMPLEMENTED",
+        current_task().unwrap().pid.0
+    );
     -1
 }
 
 /// YOUR JOB: Implement unlinkat.
 pub fn sys_unlinkat(_name: *const u8) -> isize {
-    trace!("kernel:pid[{}] sys_unlinkat NOT IMPLEMENTED", current_task().unwrap().pid.0);
+    trace!(
+        "kernel:pid[{}] sys_unlinkat NOT IMPLEMENTED",
+        current_task().unwrap().pid.0
+    );
     -1
 }
