@@ -22,3 +22,9 @@ pub const TRAMPOLINE: usize = usize::MAX - PAGE_SIZE + 1;
 pub const TRAP_CONTEXT_BASE: usize = TRAMPOLINE - PAGE_SIZE;
 /// qemu board info
 pub use crate::board::{CLOCK_FREQ, MMIO};
+/// processes number
+pub const NUM_PROCESSES: usize = 3;
+/// resources number
+pub const NUM_RESOURCES: usize = 1;
+/// Total available
+pub const TOTAL_AVAILABLE: [usize; NUM_PROCESSES] = [1, 4096 * 2, 1];

@@ -5,6 +5,7 @@ use super::manager::insert_into_pid2process;
 use super::TaskControlBlock;
 use super::{add_task, SignalFlags};
 use super::{pid_alloc, PidHandle};
+use crate::config::{NUM_PROCESSES, NUM_RESOURCES};
 use crate::fs::{File, Stdin, Stdout};
 use crate::mm::{translated_refmut, MemorySet, KERNEL_SPACE};
 use crate::sync::{Condvar, Mutex, Semaphore, UPSafeCell};
@@ -49,6 +50,16 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+    /// For current resource allocation. Implement in [CH8]
+    pub allocation: Vec<Vec<usize>>,
+    /// For maximum resource needs. Implement in [CH8]
+    pub max: Vec<Vec<usize>>,
+    /// New field to enable/disable deadlock detection. Implement in [CH8]
+    pub deadlock_detection_enabled: bool,
+    /// Total number of process. Implement in [CH8]
+    pub num_processes: usize,
+    /// Total number of resources
+    pub num_resources: usize,
 }
 
 impl ProcessControlBlockInner {
@@ -119,6 +130,11 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    allocation: vec![vec![0; NUM_RESOURCES]; NUM_PROCESSES],
+                    max: vec![vec![0; NUM_RESOURCES]; NUM_PROCESSES],
+                    deadlock_detection_enabled: false,
+                    num_processes: NUM_PROCESSES,
+                    num_resources: NUM_RESOURCES,
                 })
             },
         });
@@ -245,6 +261,11 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    allocation: vec![vec![0; NUM_RESOURCES]; NUM_PROCESSES],
+                    max: vec![vec![0; NUM_RESOURCES]; NUM_PROCESSES],
+                    deadlock_detection_enabled: false,
+                    num_processes: NUM_PROCESSES,
+                    num_resources: NUM_RESOURCES,
                 })
             },
         });
