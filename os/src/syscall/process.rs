@@ -1,11 +1,12 @@
 use crate::{
     config::MAX_SYSCALL_NUM,
     fs::{open_file, OpenFlags},
-    mm::{translated_ref, translated_refmut, translated_str},
+    mm::{translated_byte_buffer, translated_ref, translated_refmut, translated_str},
     task::{
         current_process, current_task, current_user_token, exit_current_and_run_next, pid2process,
         suspend_current_and_run_next, SignalFlags, TaskStatus,
     },
+    timer::get_time_us,
 };
 use alloc::{string::String, sync::Arc, vec::Vec};
 
@@ -21,14 +22,14 @@ pub struct TimeVal {
 pub struct TaskInfo {
     /// Task status in it's life cycle
     status: TaskStatus,
-    /// The numbers of syscall called by task
+    /// The numbers of `syscall` called by task
     syscall_times: [u32; MAX_SYSCALL_NUM],
     /// Total running time of task
     time: usize,
 }
-/// exit syscall
+/// Exit `syscall`
 ///
-/// exit the current task and run the next task in task list
+/// Exit the current task and run the next task in task list
 pub fn sys_exit(exit_code: i32) -> ! {
     trace!(
         "kernel:pid[{}] sys_exit",
@@ -37,13 +38,12 @@ pub fn sys_exit(exit_code: i32) -> ! {
     exit_current_and_run_next(exit_code);
     panic!("Unreachable in sys_exit!");
 }
-/// yield syscall
+/// Yield `syscall`
 pub fn sys_yield() -> isize {
-    //trace!("kernel: sys_yield");
     suspend_current_and_run_next();
     0
 }
-/// getpid syscall
+/// Getpid `syscall`
 pub fn sys_getpid() -> isize {
     trace!(
         "kernel: sys_getpid pid:{}",
@@ -51,7 +51,8 @@ pub fn sys_getpid() -> isize {
     );
     current_task().unwrap().process.upgrade().unwrap().getpid() as isize
 }
-/// fork child process syscall
+
+/// Fork child process `syscall`
 pub fn sys_fork() -> isize {
     trace!(
         "kernel:pid[{}] sys_fork",
@@ -60,16 +61,17 @@ pub fn sys_fork() -> isize {
     let current_process = current_process();
     let new_process = current_process.fork();
     let new_pid = new_process.getpid();
-    // modify trap context of new_task, because it returns immediately after switching
+    // Modify trap context of new_task, because it returns immediately after switching
     let new_process_inner = new_process.inner_exclusive_access();
     let task = new_process_inner.tasks[0].as_ref().unwrap();
     let trap_cx = task.inner_exclusive_access().get_trap_cx();
-    // we do not have to move to next instruction since we have done it before
+    // We do not have to move to next instruction since we have done it before
     // for child process, fork returns 0
     trap_cx.x[10] = 0;
     new_pid as isize
 }
-/// exec syscall
+
+/// Exec `syscall`
 pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_exec",
@@ -93,21 +95,20 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
         let process = current_process();
         let argc = args_vec.len();
         process.exec(all_data.as_slice(), args_vec);
-        // return argc because cx.x[10] will be covered with it later
+        // Return argc because `cx.x[10]` will be covered with it later
         argc as isize
     } else {
         -1
     }
 }
 
-/// waitpid syscall
+/// `Waitpid syscall`
 ///
 /// If there is not a child process whose pid is same as given, return -1.
 /// Else if there is a child process but it is still running, return -2.
 pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
-    //trace!("kernel: sys_waitpid");
     let process = current_process();
-    // find a child process
+    // Find a child process
 
     let mut inner = process.inner_exclusive_access();
     if !inner
@@ -116,16 +117,16 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
         .any(|p| pid == -1 || pid as usize == p.getpid())
     {
         return -1;
-        // ---- release current PCB
+        // ---- Release current PCB
     }
     let pair = inner.children.iter().enumerate().find(|(_, p)| {
         // ++++ temporarily access child PCB exclusively
         p.inner_exclusive_access().is_zombie && (pid == -1 || pid as usize == p.getpid())
-        // ++++ release child PCB
+        // ++++ Release child PCB
     });
     if let Some((idx, _)) = pair {
         let child = inner.children.remove(idx);
-        // confirm that child will be deallocated after being removed from children list
+        // Confirm that child will be deallocated after being removed from children list
         assert_eq!(Arc::strong_count(&child), 1);
         let found_pid = child.getpid();
         // ++++ temporarily access child PCB exclusively
@@ -136,10 +137,10 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
     } else {
         -2
     }
-    // ---- release current PCB automatically
+    // ---- Release current PCB automatically
 }
 
-/// kill syscall
+/// Kill `syscall`
 pub fn sys_kill(pid: usize, signal: u32) -> isize {
     trace!(
         "kernel:pid[{}] sys_kill",
@@ -157,17 +158,35 @@ pub fn sys_kill(pid: usize, signal: u32) -> isize {
     }
 }
 
-/// get_time syscall
-///
-/// YOUR JOB: get time with second and microsecond
-/// HINT: You might reimplement it with virtual memory management.
-/// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
+/// Get_time `syscall`
+/// Implement in [CH3], re implement in [CH6]
+/// Implement by myself
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
         current_task().unwrap().process.upgrade().unwrap().getpid()
     );
-    -1
+    let us = get_time_us();
+    let dst_vec = translated_byte_buffer(
+        current_user_token(),
+        ts as *const u8,
+        core::mem::size_of::<TimeVal>(),
+    );
+    let ref time_val = TimeVal {
+        sec: us / 1_000_000,
+        usec: us % 1_000_000,
+    };
+    let src_ptr = time_val as *const TimeVal;
+    for (idx, dst) in dst_vec.into_iter().enumerate() {
+        let unit_len = dst.len();
+        unsafe {
+            dst.copy_from_slice(core::slice::from_raw_parts(
+                src_ptr.wrapping_byte_add(idx * unit_len) as *const u8,
+                unit_len,
+            ));
+        }
+    }
+    0
 }
 
 /// task_info syscall

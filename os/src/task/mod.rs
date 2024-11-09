@@ -76,16 +76,17 @@ pub fn exit_current_and_run_next(exit_code: i32) {
         "kernel: pid[{}] exit_current_and_run_next",
         current_task().unwrap().process.upgrade().unwrap().getpid()
     );
-    // take from Processor
+    // 回收线程各种资源
+    // Take from Processor
     let task = take_current_task().unwrap();
     let mut task_inner = task.inner_exclusive_access();
     let process = task.process.upgrade().unwrap();
     let tid = task_inner.res.as_ref().unwrap().tid;
-    // record exit code
+    // Record exit code
     task_inner.exit_code = Some(exit_code);
     task_inner.res = None;
-    // here we do not remove the thread since we are still using the kstack
-    // it will be deallocated when sys_waittid is called
+    // Here we do not remove the thread since we are still using the `kstack`
+    // it will be deallocated when `sys_waittid` is called
     drop(task_inner);
 
     // Move the task to stop-wait status, to avoid kernel stack from being freed
@@ -94,8 +95,9 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     } else {
         drop(task);
     }
-    // however, if this is the main thread of current process
+    // However, if this is the main thread of current process
     // the process should terminate at once
+    // 如果Main Thread发出的退去请求，则回收整个Process的部分资源，并退出Process.
     if tid == 0 {
         let pid = process.getpid();
         if pid == IDLE_PID {
@@ -104,39 +106,41 @@ pub fn exit_current_and_run_next(exit_code: i32) {
                 exit_code
             );
             if exit_code != 0 {
-                //crate::sbi::shutdown(255); //255 == -1 for err hint
+                //`crate::sbi::shutdown(255);` //255 == -1 for err hint
                 crate::board::QEMU_EXIT_HANDLE.exit_failure();
             } else {
-                //crate::sbi::shutdown(0); //0 for success hint
+                //`crate::sbi::shutdown(0);` //0 for success hint
                 crate::board::QEMU_EXIT_HANDLE.exit_success();
             }
         }
         remove_from_pid2process(pid);
         let mut process_inner = process.inner_exclusive_access();
-        // mark this process as a zombie process
+        // Mark this process as a zombie process
         process_inner.is_zombie = true;
-        // record exit code of main process
+        // Record exit code of main process
         process_inner.exit_code = exit_code;
 
         {
-            // move all child processes under init process
+            // Move all child processes under `init` process
             let mut initproc_inner = INITPROC.inner_exclusive_access();
+            // 将当前Process的所有子Process挂载在初始Process `INITPROC`下面，其做法是遍历每个子Process，
+            // 修改其父Process为`INITPROC`，并加入`INITPROC`的孩子向量中。
             for child in process_inner.children.iter() {
                 child.inner_exclusive_access().parent = Some(Arc::downgrade(&INITPROC));
                 initproc_inner.children.push(child.clone());
             }
         }
 
-        // deallocate user res (including tid/trap_cx/ustack) of all threads
-        // it has to be done before we dealloc the whole memory_set
+        // Deallocate user res (including `tid/trap_cx/ustack`) of all threads
+        // it has to be done before we `dealloc` the whole memory_set
         // otherwise they will be deallocated twice
         let mut recycle_res = Vec::<TaskUserRes>::new();
         for task in process_inner.tasks.iter().filter(|t| t.is_some()) {
             let task = task.as_ref().unwrap();
-            // if other tasks are Ready in TaskManager or waiting for a timer to be
+            // If other tasks are Ready in `TaskManager` or waiting for a timer to be
             // expired, we should remove them.
             //
-            // Mention that we do not need to consider Mutex/Semaphore since they
+            // Mention that we do not need to consider `Mutex/Semaphore` since they
             // are limited in a single process. Therefore, the blocked tasks are
             // removed when the PCB is deallocated.
             trace!("kernel: exit_current_and_run_next .. remove_inactive_task");
@@ -146,7 +150,7 @@ pub fn exit_current_and_run_next(exit_code: i32) {
                 recycle_res.push(res);
             }
         }
-        // dealloc_tid and dealloc_user_res require access to PCB inner, so we
+        // `dealloc_tid` and `dealloc_user_res` require access to PCB inner, so we
         // need to collect those user res first, then release process_inner
         // for now to avoid deadlock/double borrow problem.
         drop(process_inner);
@@ -154,15 +158,17 @@ pub fn exit_current_and_run_next(exit_code: i32) {
 
         let mut process_inner = process.inner_exclusive_access();
         process_inner.children.clear();
-        // deallocate other data in user space i.e. program code/data section
+        // Deallocate other data in user space i.e. program code/data section
         process_inner.memory_set.recycle_data_pages();
-        // drop file descriptors
+        // Drop file descriptors
         process_inner.fd_table.clear();
-        // remove all tasks
+        // Remove all tasks
         process_inner.tasks.clear();
     }
+    // 将当前进程的孩子向量清空
     drop(process);
-    // we do not have to save task context
+    // We do not have to save task context
+    // 进行线程调度切换
     let mut _unused = TaskContext::zero_init();
     schedule(&mut _unused as *mut _);
 }

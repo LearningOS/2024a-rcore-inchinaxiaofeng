@@ -78,27 +78,33 @@ impl MutexBlocking {
 }
 
 impl Mutex for MutexBlocking {
-    /// lock the blocking mutex
+    /// Lock the blocking `mutex`
     fn lock(&self) {
         trace!("kernel: MutexBlocking::lock");
         let mut mutex_inner = self.inner.exclusive_access();
+        // 如果互斥锁`mutex`已经被其他线程获取了
         if mutex_inner.locked {
+            // 那么将当前线程放入等待队列中
             mutex_inner.wait_queue.push_back(current_task().unwrap());
             drop(mutex_inner);
+            // 让当前线程处于等待状态，并调度其他线程执行
             block_current_and_run_next();
         } else {
+            // 如果互斥锁`mutex`还没有被获取，那么当前线程会获取给互斥锁，并返回系统调用
             mutex_inner.locked = true;
         }
     }
 
-    /// unlock the blocking mutex
+    /// Unlock the blocking `mutex`
     fn unlock(&self) {
         trace!("kernel: MutexBlocking::unlock");
         let mut mutex_inner = self.inner.exclusive_access();
         assert!(mutex_inner.locked);
+        // 如果有等待的线程，唤醒等待最久的那个线程，相当于将锁的所有权移交给该线程。
         if let Some(waking_task) = mutex_inner.wait_queue.pop_front() {
             wakeup_task(waking_task);
         } else {
+            // 如果没有等待线程，释放锁
             mutex_inner.locked = false;
         }
     }
