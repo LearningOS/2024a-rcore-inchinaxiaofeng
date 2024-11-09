@@ -43,6 +43,6 @@ impl Condvar {
         inner.wait_queue.push_back(current_task().unwrap());
         drop(inner);
         block_current_and_run_next();
-        mutex.lock();
+        mutex.lock(0xdead, 0xdead);
     }
 }

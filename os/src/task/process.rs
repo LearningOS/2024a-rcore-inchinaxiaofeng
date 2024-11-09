@@ -5,7 +5,6 @@ use super::manager::insert_into_pid2process;
 use super::TaskControlBlock;
 use super::{add_task, SignalFlags};
 use super::{pid_alloc, PidHandle};
-use crate::config::{NUM_PROCESSES, NUM_RESOURCES};
 use crate::fs::{File, Stdin, Stdout};
 use crate::mm::{translated_refmut, MemorySet, KERNEL_SPACE};
 use crate::sync::{Condvar, Mutex, Semaphore, UPSafeCell};
@@ -48,18 +47,16 @@ pub struct ProcessControlBlockInner {
     pub mutex_list: Vec<Option<Arc<dyn Mutex>>>,
     /// semaphore list
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
-    /// condvar list
+    /// Condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
-    /// For current resource allocation. Implement in [CH8]
-    pub allocation: Vec<Vec<usize>>,
-    /// For maximum resource needs. Implement in [CH8]
-    pub max: Vec<Vec<usize>>,
-    /// New field to enable/disable deadlock detection. Implement in [CH8]
+    /// For current resource allocation. Implement in [CH8].
+    pub allocation: [Vec<Vec<isize>>; 2],
+    /// Available matrix. Implement in [CH8].
+    pub available: [Vec<isize>; 2],
+    /// The needs matrix. Implement in [CH8].
+    pub need: [Vec<Vec<isize>>; 2],
+    /// New field to enable/disable deadlock detection. Implement in [CH8].
     pub deadlock_detection_enabled: bool,
-    /// Total number of process. Implement in [CH8]
-    pub num_processes: usize,
-    /// Total number of resources
-    pub num_resources: usize,
 }
 
 impl ProcessControlBlockInner {
@@ -130,11 +127,10 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
-                    allocation: vec![vec![0; NUM_RESOURCES]; NUM_PROCESSES],
-                    max: vec![vec![0; NUM_RESOURCES]; NUM_PROCESSES],
+                    allocation: [Vec::new(), Vec::new()],
+                    available: [Vec::new(), Vec::new()],
+                    need: [Vec::new(), Vec::new()],
                     deadlock_detection_enabled: false,
-                    num_processes: NUM_PROCESSES,
-                    num_resources: NUM_RESOURCES,
                 })
             },
         });
@@ -261,11 +257,10 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
-                    allocation: vec![vec![0; NUM_RESOURCES]; NUM_PROCESSES],
-                    max: vec![vec![0; NUM_RESOURCES]; NUM_PROCESSES],
+                    allocation: [Vec::new(), Vec::new()],
+                    available: [Vec::new(), Vec::new()],
+                    need: [Vec::new(), Vec::new()],
                     deadlock_detection_enabled: false,
-                    num_processes: NUM_PROCESSES,
-                    num_resources: NUM_RESOURCES,
                 })
             },
         });
